@@ -8,28 +8,38 @@
 <script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://unpkg.com/piexifjs@1.0.6/piexif.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/ort.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
   --bg:#0a0a0a;--surface:#111111;--surface2:#1a1a1a;--border:#2a2a2a;
   --accent:#c8ff00;--accent2:#00ffb3;--text:#f0f0f0;--muted:#666;
-  --danger:#ff5555;
+  --danger:#ff5555;--warn:#ffaa44;
 }
 body{background:var(--bg);color:var(--text);font-family:'Syne',sans-serif;min-height:100vh;padding:36px 28px 60px;overflow-x:hidden;max-width:1100px;margin:0 auto}
 
 .header{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:8px}
-h1{font-size:clamp(30px,5vw,54px);font-weight:800;letter-spacing:-2px;line-height:1}
+h1{font-size:clamp(28px,5vw,52px);font-weight:800;letter-spacing:-2px;line-height:1}
 h1 span{color:var(--accent)}
 .brand{font-family:'DM Mono',monospace;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);border:1px solid var(--border);border-radius:6px;padding:5px 12px;white-space:nowrap;margin-bottom:6px}
 .brand em{color:var(--accent);font-style:normal}
-.sub{font-family:'DM Mono',monospace;font-size:12px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;margin-bottom:28px}
+.sub{font-family:'DM Mono',monospace;font-size:12px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;margin-bottom:20px}
 
-.model-status{display:flex;align-items:center;gap:8px;font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);margin-bottom:24px}
+/* エンジン状態 */
+.engine-bar{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 18px;margin-bottom:20px;display:flex;flex-direction:column;gap:8px}
+.engine-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--border);flex-shrink:0}
 .dot.loading{background:var(--accent);animation:blink 1s infinite}
-.dot.ready{background:var(--accent2)}
+.dot.ready-ai{background:var(--accent2)}
+.dot.ready-fb{background:var(--warn)}
 .dot.error{background:var(--danger)}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0.25}}
+.engine-label{font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)}
+.engine-mode{font-family:'DM Mono',monospace;font-size:11px;padding:3px 10px;border-radius:5px;font-weight:500}
+.engine-mode.ai{background:rgba(0,255,179,0.1);color:var(--accent2);border:1px solid rgba(0,255,179,0.3)}
+.engine-mode.fallback{background:rgba(255,170,68,0.1);color:var(--warn);border:1px solid rgba(255,170,68,0.3)}
+.engine-mode.loading{background:rgba(200,255,0,0.07);color:var(--accent);border:1px solid rgba(200,255,0,0.2)}
+.privacy-note{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);line-height:1.5}
 
 .panel{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:24px;position:relative;overflow:hidden}
 .panel::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(200,255,0,0.22),transparent)}
@@ -39,8 +49,7 @@ h1 span{color:var(--accent)}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
 @media(max-width:720px){.grid{grid-template-columns:1fr}}
 
-/* アップロード */
-.upload-area{border:2px dashed var(--border);border-radius:12px;padding:28px 20px;text-align:center;cursor:pointer;transition:all 0.2s;position:relative;min-height:160px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}
+.upload-area{border:2px dashed var(--border);border-radius:12px;padding:24px 20px;text-align:center;cursor:pointer;transition:all 0.2s;position:relative;min-height:150px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}
 .upload-area:hover,.upload-area.drag{border-color:var(--accent);background:rgba(200,255,0,0.025)}
 .upload-area>input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
 .upload-row{display:flex;align-items:center;gap:12px}
@@ -53,15 +62,14 @@ h1 span{color:var(--accent)}
 .fmt-tag{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1px;border:1px solid var(--border);border-radius:4px;padding:2px 7px;color:var(--muted)}
 .fmt-tag.img{border-color:rgba(200,255,0,0.3);color:rgba(200,255,0,0.65)}
 .fmt-tag.doc{border-color:rgba(0,255,179,0.3);color:rgba(0,255,179,0.65)}
+.fmt-note{font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);text-align:center;line-height:1.5;margin-top:4px}
 
-/* プレビュー */
-.preview-wrap{position:relative;border-radius:12px;overflow:hidden;background:#000;min-height:160px;display:flex;align-items:center;justify-content:center}
-.preview-wrap img{max-width:100%;max-height:320px;object-fit:contain;display:block}
+.preview-wrap{position:relative;border-radius:12px;overflow:hidden;background:#000;min-height:150px;display:flex;align-items:center;justify-content:center}
+.preview-wrap img{max-width:100%;max-height:300px;object-fit:contain;display:block}
 .img-badge{position:absolute;bottom:8px;left:8px;background:rgba(0,0,0,0.78);border-radius:5px;padding:3px 9px;font-family:'DM Mono',monospace;font-size:10px;color:#fff}
 .reset-btn{margin-top:8px;background:none;border:1px solid var(--border);border-radius:6px;padding:6px 14px;font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);cursor:pointer;width:100%;transition:all 0.15s}
 .reset-btn:hover{border-color:var(--accent);color:var(--accent)}
 
-/* コントロール */
 .controls{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:22px 24px;margin-bottom:16px}
 .ctrl-row{display:flex;align-items:flex-end;gap:20px;flex-wrap:wrap}
 .ctrl-group{display:flex;flex-direction:column;gap:7px}
@@ -77,19 +85,18 @@ h1 span{color:var(--accent)}
 .scale-btn{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:7px 15px;font-family:'Syne',sans-serif;font-weight:700;font-size:14px;color:var(--muted);cursor:pointer;transition:all 0.15s}
 .scale-btn.active{background:var(--accent);border-color:var(--accent);color:#000}
 .scale-btn:hover:not(.active){border-color:var(--accent);color:var(--accent)}
-.scale-note{font-size:8px;opacity:0.55;display:block;font-weight:400}
 
-/* FIX①: display重複をなくす */
 .jpeg-row{display:none;align-items:center;gap:12px;margin-top:14px}
 .jpeg-row.show{display:flex}
 input[type=range]{flex:1;accent-color:var(--accent)}
 .range-val{font-family:'DM Mono',monospace;font-size:12px;min-width:28px;text-align:right}
 
-.options-row{display:flex;flex-wrap:wrap;gap:16px;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)}
-.opt-check{display:flex;align-items:center;gap:7px;cursor:pointer;font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);user-select:none}
-.opt-check input{accent-color:var(--accent);width:14px;height:14px;cursor:pointer}
+.options-row{display:flex;flex-wrap:wrap;gap:14px;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)}
+.opt-check{display:flex;cursor:pointer;font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);user-select:none}
+.opt-check input{accent-color:var(--accent);width:14px;height:14px;cursor:pointer;flex-shrink:0;margin-top:1px}
 .opt-check:hover{color:var(--text)}
-.opt-check.highlight{color:var(--accent2)}
+.opt-check-body{display:flex;flex-direction:column;gap:3px;padding-left:7px}
+.opt-check-sub{font-size:9px;color:var(--muted);line-height:1.5;opacity:0.8}
 
 .btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px;align-items:center}
 .btn-main{background:var(--accent);border:none;border-radius:10px;padding:13px 28px;font-family:'Syne',sans-serif;font-weight:800;font-size:15px;color:#000;cursor:pointer;transition:all 0.15s;letter-spacing:-0.5px;white-space:nowrap}
@@ -105,21 +112,24 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 
 .progress-wrap{margin-top:14px;display:none}
 .progress-wrap.show{display:block}
-.pb-bg{height:3px;background:var(--border);border-radius:2px;overflow:hidden}
+.pb-bg{height:4px;background:var(--border);border-radius:2px;overflow:hidden}
 .pb{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:2px;width:0%;transition:width 0.2s}
 .pb-text{font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);margin-top:6px}
 
-.error-msg{background:rgba(255,85,85,0.08);border:1px solid rgba(255,85,85,0.3);border-radius:8px;padding:10px 14px;font-family:'DM Mono',monospace;font-size:12px;color:var(--danger);margin-top:10px;display:none}
+.error-msg{background:rgba(255,85,85,0.08);border:1px solid rgba(255,85,85,0.3);border-radius:8px;padding:10px 14px;font-family:'DM Mono',monospace;font-size:12px;color:var(--danger);margin-top:10px;display:none;line-height:1.6}
 .error-msg.show{display:block}
+.warn-msg{background:rgba(255,170,68,0.08);border:1px solid rgba(255,170,68,0.3);border-radius:8px;padding:10px 14px;font-family:'DM Mono',monospace;font-size:12px;color:var(--warn);margin-top:10px;display:none;line-height:1.6}
+.warn-msg.show{display:block}
 
-.out-tag{font-family:'DM Mono',monospace;font-size:10px;border-radius:5px;padding:3px 9px;margin-left:auto;background:rgba(0,255,179,0.07);border:1px solid rgba(0,255,179,0.28);color:var(--accent2);display:none}
+.out-tag{font-family:'DM Mono',monospace;font-size:10px;border-radius:5px;padding:3px 9px;margin-left:auto;display:none}
+.out-tag.ai{background:rgba(0,255,179,0.07);border:1px solid rgba(0,255,179,0.28);color:var(--accent2)}
+.out-tag.fb{background:rgba(255,170,68,0.07);border:1px solid rgba(255,170,68,0.28);color:var(--warn)}
 
 /* 比較スライダー */
 .compare-outer{position:relative;border-radius:12px;overflow:hidden;background:#000;user-select:none;line-height:0}
-.compare-outer .out-img{display:block;width:100%;max-height:340px;object-fit:contain}
+.compare-outer .out-img{display:block;width:100%;max-height:320px;object-fit:contain}
 .compare-overlay{position:absolute;top:0;left:0;height:100%;overflow:hidden;width:50%;pointer-events:none}
-/* FIX①: before画像はoutput画像と同じ表示幅に合わせる必要がある */
-.compare-overlay img{display:block;width:100%;max-height:340px;object-fit:contain;position:absolute;top:0;left:0}
+.compare-overlay img{display:block;width:100%;max-height:320px;object-fit:contain;position:absolute;top:0;left:0}
 .compare-line{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);cursor:col-resize;z-index:10;left:50%;transform:translateX(-50%);display:flex;align-items:center;justify-content:center}
 .compare-handle{width:28px;height:28px;border-radius:50%;background:var(--accent);color:#000;font-size:13px;font-weight:800;display:flex;align-items:center;justify-content:center;margin-left:-13px;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,0.5)}
 .c-label{position:absolute;font-family:'DM Mono',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;padding:3px 7px;background:rgba(0,0,0,0.7);border-radius:4px;top:8px;z-index:5;line-height:1.4}
@@ -128,7 +138,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 
 .batch-queue{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:20px 24px;margin-bottom:16px;display:none}
 .batch-queue.show{display:block}
-.queue-list{display:flex;flex-direction:column;gap:6px;margin-top:12px;max-height:220px;overflow-y:auto}
+.queue-list{display:flex;flex-direction:column;gap:6px;margin-top:12px;max-height:200px;overflow-y:auto}
 .qi{display:flex;align-items:center;gap:10px;background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:7px 12px;font-family:'DM Mono',monospace;font-size:11px}
 .qi-icon{width:18px;text-align:center;flex-shrink:0}
 .qi-icon.done{color:var(--accent2)}
@@ -139,7 +149,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 
 .print-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:20px 24px;margin-bottom:16px;display:none}
 .print-card.show{display:block}
-.print-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(108px,1fr));gap:8px;margin-top:12px}
+.print-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(106px,1fr));gap:8px;margin-top:12px}
 .pi{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;position:relative}
 .pi.best{border-color:rgba(200,255,0,0.4)}
 .pi.good{border-color:rgba(0,255,179,0.28)}
@@ -155,7 +165,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 .pi-rec{position:absolute;top:6px;right:6px;font-family:'DM Mono',monospace;font-size:7px;letter-spacing:1px;text-transform:uppercase;background:rgba(200,255,0,0.13);color:var(--accent);border-radius:3px;padding:2px 5px}
 .print-note{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);margin-top:10px;line-height:1.7}
 
-.footer{font-family:'DM Mono',monospace;font-size:10px;color:#222;text-align:center;margin-top:48px;letter-spacing:1px}
+.footer{font-family:'DM Mono',monospace;font-size:10px;color:#222;text-align:center;margin-top:48px;letter-spacing:1px;line-height:1.8}
 </style>
 </head>
 <body>
@@ -164,20 +174,26 @@ input[type=range]{flex:1;accent-color:var(--accent)}
   <h1>AI<br><span>UPSCALE</span></h1>
   <div class="brand"><em>SAKASU</em> ORIGINAL</div>
 </div>
-<p class="sub">browser-native · no server · unlimited use</p>
+<p class="sub">browser-native · no upload · unlimited use</p>
 
-<div class="model-status">
-  <div class="dot loading" id="dot"></div>
-  <span id="status-text">ライブラリを読み込み中...</span>
+<!-- エンジン状態バー -->
+<div class="engine-bar">
+  <div class="engine-row">
+    <div class="dot loading" id="dot"></div>
+    <span class="engine-label" id="engine-label">AIモデルを読み込み中...</span>
+    <span class="engine-mode loading" id="engine-mode">準備中</span>
+  </div>
+  <div class="privacy-note">画像データは外部サーバーに送信されません。ブラウザ内で処理されます。<br>※ AIモデル・ライブラリの初回読み込みには外部通信が発生します。</div>
 </div>
 
+<!-- コントロール -->
 <div class="controls">
   <div class="ctrl-row">
     <div class="ctrl-group">
       <span class="ctrl-label">処理モード</span>
-      <div class="seg" style="min-width:260px">
+      <div class="seg" style="min-width:280px">
         <button class="seg-btn active" data-mode="upscale" onclick="setMode('upscale')">拡大＋高画質化<small>解像度アップ</small></button>
-        <button class="seg-btn" data-mode="denoise" onclick="setMode('denoise')">ノイズ除去のみ<small>シャープ処理だけ</small></button>
+        <button class="seg-btn" data-mode="sharpen" onclick="setMode('sharpen')">輪郭くっきり補正<small>拡大せずシャープに整える</small></button>
       </div>
     </div>
     <div class="ctrl-group" id="scale-group">
@@ -186,7 +202,6 @@ input[type=range]{flex:1;accent-color:var(--accent)}
         <button class="scale-btn active" data-scale="2">×2</button>
         <button class="scale-btn" data-scale="3">×3</button>
         <button class="scale-btn" data-scale="4">×4</button>
-        <button class="scale-btn" data-scale="8">×8<span class="scale-note">印刷用</span></button>
       </div>
     </div>
     <div class="ctrl-group">
@@ -206,15 +221,26 @@ input[type=range]{flex:1;accent-color:var(--accent)}
   </div>
 
   <div class="options-row">
-    <label class="opt-check highlight" style="flex-direction:column;align-items:flex-start;gap:3px">
-      <span style="display:flex;align-items:center;gap:7px"><input type="checkbox" id="opt-exif" checked> EXIFデータを保持する</span>
-      <span style="font-size:9px;color:var(--muted);padding-left:21px;line-height:1.5">撮影日時・カメラ機種・GPS位置情報など写真に埋め込まれた情報。<br>※ JPEG出力時のみ有効。PNG/WebPでは保持されません。</span>
+    <label class="opt-check">
+      <input type="checkbox" id="opt-exif">
+      <div class="opt-check-body">
+        <span>EXIFデータを保持する</span>
+        <span class="opt-check-sub">撮影日時・カメラ機種・GPS位置情報などが含まれる場合があります。<br>必要な場合のみONにしてください。※JPEG出力時のみ有効</span>
+      </div>
     </label>
     <label class="opt-check">
-      <input type="checkbox" id="opt-pdf-all" checked> PDF: 全ページを処理する
+      <input type="checkbox" id="opt-pdf-all" checked>
+      <div class="opt-check-body">
+        <span>PDF: 全ページを処理する</span>
+        <span class="opt-check-sub">PDFは一度画像化してから処理します。<br>文字・ベクター情報は保持されません。</span>
+      </div>
     </label>
     <label class="opt-check">
-      <input type="checkbox" id="opt-pdf-merge"> PDF: 結合PDFで出力する
+      <input type="checkbox" id="opt-pdf-merge">
+      <div class="opt-check-body">
+        <span>PDF: 結合PDFで出力する</span>
+        <span class="opt-check-sub">出力は画像PDFになります。</span>
+      </div>
     </label>
   </div>
 
@@ -229,27 +255,34 @@ input[type=range]{flex:1;accent-color:var(--accent)}
     <div class="pb-bg"><div class="pb" id="pb"></div></div>
     <div class="pb-text" id="pb-text">処理中...</div>
   </div>
+  <div class="warn-msg" id="warn-msg"></div>
   <div class="error-msg" id="error-msg"></div>
 </div>
 
+<!-- 入出力 -->
 <div class="grid">
   <div class="panel">
     <div class="panel-label">入力 <span id="in-count" style="font-family:'DM Mono',monospace;font-size:10px;color:var(--accent);display:none"></span></div>
     <div id="upload-area-wrap">
       <div class="upload-area" id="drop-zone">
-        <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp,image/tiff,image/bmp,image/gif,application/pdf" multiple>
+        <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp,image/tiff,image/bmp,application/pdf" multiple>
         <div class="upload-row">
           <div class="upload-icon">🖼</div>
           <div>
             <div class="upload-title">ドロップ または</div>
-            <div class="select-btn">＋ ファイルを選択<input type="file" id="file-btn" accept="image/png,image/jpeg,image/webp,image/tiff,image/bmp,image/gif,application/pdf" multiple></div>
+            <div class="select-btn">＋ ファイルを選択<input type="file" id="file-btn" accept="image/png,image/jpeg,image/webp,image/tiff,image/bmp,application/pdf" multiple></div>
           </div>
         </div>
         <div class="fmt-row">
-          <span class="fmt-tag img">PNG</span><span class="fmt-tag img">JPG</span><span class="fmt-tag img">WebP</span>
-          <span class="fmt-tag img">TIFF</span><span class="fmt-tag img">BMP</span><span class="fmt-tag doc">PDF (全ページ)</span>
-          <span class="fmt-tag" style="color:#444">複数選択OK</span>
+          <span class="fmt-tag img">PNG</span>
+          <span class="fmt-tag img">JPG</span>
+          <span class="fmt-tag img">WebP</span>
+          <span class="fmt-tag img">TIFF</span>
+          <span class="fmt-tag img">BMP</span>
+          <span class="fmt-tag doc">PDF</span>
+          <span class="fmt-tag" style="color:#444">複数OK</span>
         </div>
+        <div class="fmt-note">TIFFは一部形式のみ対応です。<br>PDFは画像化して処理します。</div>
       </div>
     </div>
     <div id="preview-area" style="display:none">
@@ -263,12 +296,11 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 
   <div class="panel">
     <div class="panel-label">出力 <span class="out-tag" id="out-tag"></span></div>
-    <div id="out-placeholder" style="border:2px dashed var(--border);border-radius:12px;min-height:200px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px">
-      <div style="font-size:30px;opacity:0.18">✨</div>
+    <div id="out-placeholder" style="border:2px dashed var(--border);border-radius:12px;min-height:190px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px">
+      <div style="font-size:28px;opacity:0.15">✨</div>
       <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">処理後に表示されます</div>
     </div>
     <div id="out-preview" style="display:none">
-      <!-- FIX②: compare-outerにoutput画像と同サイズでbeforeを重ねる -->
       <div class="compare-outer" id="compare-outer">
         <img class="out-img" id="out-img" src="" alt="出力">
         <div class="compare-overlay" id="cmp-overlay">
@@ -284,53 +316,199 @@ input[type=range]{flex:1;accent-color:var(--accent)}
   </div>
 </div>
 
+<!-- バッチキュー -->
 <div class="batch-queue" id="batch-queue">
   <div class="panel-label">処理キュー</div>
   <div class="queue-list" id="queue-list"></div>
 </div>
 
+<!-- 印刷耐性 -->
 <div class="print-card" id="print-card">
   <div class="panel-label">印刷耐性ガイド</div>
   <div class="print-grid" id="print-grid"></div>
   <div class="print-note" id="print-note"></div>
 </div>
 
-<div class="footer">SAKASU ORIGINAL · Browser-native · No data leaves your device · 2025</div>
+<div class="footer">
+  SAKASU ORIGINAL · 画像データは外部サーバーに送信されません · 2025<br>
+  AIモデル使用時: AI超解像 / Real-ESRGAN · 非対応時: 高品質補間モードで処理
+</div>
 
 <script>
+// ===== 定数 =====
 const PRINT_SIZES=[
   {name:'名刺',w:91,h:55},{name:'L判',w:127,h:89},{name:'A6',w:148,h:105},
   {name:'A5',w:210,h:148},{name:'A4',w:297,h:210},{name:'A3',w:420,h:297},
   {name:'A2',w:594,h:420},{name:'B2',w:728,h:515},
 ];
 
-let modelReady=false, currentMode='upscale', currentScale=2, currentFmt='png';
-// FIX③: queue各アイテムに inputDataUrl を持たせる（比較スライダー用）
+// 出力安全制限
+const MAX_LONG_SIDE=12000;
+const MAX_MEGAPIXELS=80;
+
+// ===== エンジン状態 =====
+// engineState: 'loading' | 'ai-webgpu' | 'ai-wasm' | 'fallback'
+let engineState='loading';
+let onnxSession=null;
+let detectedModelScale=4; // テスト推論で確認した実際のモデル出力倍率
+
+// ===== UI状態 =====
+let currentMode='upscale', currentScale=2, currentFmt='png';
 let queue=[];
 let originalFileName='image';
 
+// ===== 比較スライダー（グローバル・重複防止）=====
+let _cmpDrag=false, _cmpOuter=null, _cmpOverlay=null, _cmpLine=null, _cmpAttached=false;
+function _cmpSetPos(p){
+  const pct=Math.max(2,Math.min(98,p));
+  if(_cmpOverlay) _cmpOverlay.style.width=pct+'%';
+  if(_cmpLine){_cmpLine.style.left=pct+'%';_cmpLine.style.transform='translateX(-50%)';}
+}
+function initCompareSlider(){
+  _cmpOuter=document.getElementById('compare-outer');
+  _cmpOverlay=document.getElementById('cmp-overlay');
+  const newLine=document.getElementById('cmp-line').cloneNode(true);
+  document.getElementById('cmp-line').parentNode.replaceChild(newLine,document.getElementById('cmp-line'));
+  _cmpLine=newLine;
+  _cmpDrag=false;
+  _cmpSetPos(50);
+  _cmpLine.addEventListener('mousedown',e=>{_cmpDrag=true;e.preventDefault();});
+  _cmpLine.addEventListener('touchstart',e=>{_cmpDrag=true;e.preventDefault();},{passive:false});
+  if(!_cmpAttached){
+    _cmpAttached=true;
+    document.addEventListener('mousemove',e=>{if(!_cmpDrag||!_cmpOuter)return;const r=_cmpOuter.getBoundingClientRect();_cmpSetPos(((e.clientX-r.left)/r.width)*100);});
+    document.addEventListener('mouseup',()=>{_cmpDrag=false;});
+    document.addEventListener('touchmove',e=>{if(!_cmpDrag||!_cmpOuter)return;const r=_cmpOuter.getBoundingClientRect();_cmpSetPos(((e.touches[0].clientX-r.left)/r.width)*100);},{passive:true});
+    document.addEventListener('touchend',()=>{_cmpDrag=false;});
+  }
+}
+
 // ===== 初期化 =====
 window.addEventListener('load', async ()=>{
-  try{
-    if(typeof pdfjsLib!=='undefined'){
-      pdfjsLib.GlobalWorkerOptions.workerSrc='https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
-    }
-    await new Promise(r=>setTimeout(r,300));
-    modelReady=true;
-    setStatus('ready','エンジン準備完了 — 何枚でも処理できます');
-    updateRunBtn();
-  }catch(e){ setStatus('error','初期化エラー: '+e.message); }
+  if(typeof pdfjsLib!=='undefined'){
+    pdfjsLib.GlobalWorkerOptions.workerSrc='https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+  }
+  await initEngine();
 });
 
-function setStatus(t,m){ document.getElementById('dot').className='dot '+t; document.getElementById('status-text').textContent=m; }
+async function initEngine(){
+  setEngineUI('loading','AIモデルを読み込み中...','準備中');
+
+  if(typeof ort==='undefined'){
+    setFallback('ONNX Runtimeの読み込みに失敗しました。補間モードで動作します。');
+    return;
+  }
+
+  // モデルファイルの存在確認
+  try{
+    const res=await fetch('models/realesrgan_x4.onnx',{method:'HEAD'});
+    if(!res.ok) throw new Error('HTTP '+res.status);
+  }catch(e){
+    setFallback('AIモデルファイル（models/realesrgan_x4.onnx）が見つかりません。高品質補間モードで動作します。');
+    return;
+  }
+
+  ort.env.wasm.wasmPaths='https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/';
+
+  // FIX③: WebGPU → WASM と個別に試行（まとめてfallbackしない）
+  let session=null, backend=null;
+
+  // Step 1: WebGPU 単独で試行
+  if(navigator.gpu){
+    try{
+      setEngineUI('loading','AIモデルを読み込み中（WebGPU）...','読み込み中');
+      const adapter=await navigator.gpu.requestAdapter();
+      if(adapter){
+        session=await ort.InferenceSession.create('models/realesrgan_x4.onnx',{
+          executionProviders:['webgpu'],
+          graphOptimizationLevel:'all',
+        });
+        backend='webgpu';
+      }
+    }catch(e){
+      console.warn('[SAKASU] WebGPU失敗:',e.message,'→ WASMで再試行します');
+      session=null;
+    }
+  }
+
+  // Step 2: WASM 単独で試行
+  if(!session){
+    try{
+      setEngineUI('loading','AIモデルを読み込み中（WASM）...','読み込み中');
+      session=await ort.InferenceSession.create('models/realesrgan_x4.onnx',{
+        executionProviders:['wasm'],
+        graphOptimizationLevel:'all',
+      });
+      backend='wasm';
+    }catch(e){
+      setFallback('AIモデルの読み込みに失敗しました（WebGPU・WASM両方）: '+e.message);
+      return;
+    }
+  }
+
+  // FIX⑦: テスト推論でモデル形式を検証
+  setEngineUI('loading','AIモデルを検証中...','検証中');
+  const verify=await verifyModelSession(session);
+  if(!verify.ok){
+    setFallback('モデル形式が想定と異なります: '+verify.reason+'\n高品質補間モードで動作します。');
+    return;
+  }
+
+  onnxSession=session;
+  detectedModelScale=verify.modelScale;
+  engineState=backend==='webgpu'?'ai-webgpu':'ai-wasm';
+  const modeLabel=backend==='webgpu'?'AI超解像 / Real-ESRGAN / WebGPU':'AI超解像 / Real-ESRGAN / WASM';
+  setEngineUI('ready-ai',`AIモデル準備完了（×${detectedModelScale}モデル確認済み）`,modeLabel);
+  updateRunBtn();
+}
+
+// FIX⑦: テスト推論によるモデル形式検証
+async function verifyModelSession(session){
+  try{
+    const H=32,W=32; // Real-ESRGAN系は小さすぎる入力で失敗するため32×32を使用
+    const testData=new Float32Array(3*H*W).fill(0.5);
+    const inputName=session.inputNames[0];
+    if(!inputName) return{ok:false,reason:'入力名が取得できません'};
+    const feeds={[inputName]:new ort.Tensor('float32',testData,[1,3,H,W])};
+    const results=await session.run(feeds);
+    const outputName=session.outputNames[0];
+    if(!outputName) return{ok:false,reason:'出力名が取得できません'};
+    const output=results[outputName];
+    if(!output||!output.dims||output.dims.length!==4)
+      return{ok:false,reason:`出力が4次元テンソルではありません（dims: ${output?.dims}）`};
+    const[,outC,outH,outW]=output.dims;
+    if(outC!==3) return{ok:false,reason:`出力チャンネル数が3ではありません（実際: ${outC}）`};
+    const scaleH=outH/H, scaleW=outW/W;
+    if(Math.abs(scaleH-scaleW)>0.01||!Number.isInteger(Math.round(scaleH))||scaleH<2||scaleH>8)
+      return{ok:false,reason:`出力倍率が想定外です（H:${scaleH}× W:${scaleW}×）`};
+    return{ok:true,modelScale:Math.round(scaleH)};
+  }catch(e){
+    return{ok:false,reason:'テスト推論エラー: '+e.message};
+  }
+}
+
+function setFallback(reason){
+  engineState='fallback';
+  setEngineUI('ready-fb','高品質補間モード（AI非対応）','高品質補間 / Bicubic + Sharpen');
+  if(reason) console.warn('[SAKASU Upscaler]',reason);
+  updateRunBtn();
+}
+
+function setEngineUI(dotClass,label,modeText){
+  document.getElementById('dot').className='dot '+dotClass;
+  document.getElementById('engine-label').textContent=label;
+  const modeEl=document.getElementById('engine-mode');
+  modeEl.textContent=modeText;
+  modeEl.className='engine-mode '+(dotClass==='ready-ai'?'ai':dotClass==='ready-fb'?'fallback':'loading');
+}
 
 // ===== モード/フォーマット =====
 function setMode(m){
   currentMode=m;
   document.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));
   const sg=document.getElementById('scale-group');
-  sg.style.opacity=m==='denoise'?'0.35':'1';
-  sg.style.pointerEvents=m==='denoise'?'none':'';
+  sg.style.opacity=m==='sharpen'?'0.35':'1';
+  sg.style.pointerEvents=m==='sharpen'?'none':'';
 }
 function setFmt(f){
   currentFmt=f;
@@ -338,20 +516,24 @@ function setFmt(f){
   document.getElementById('jpeg-row').classList.toggle('show',f!=='png');
 }
 document.querySelectorAll('.scale-btn').forEach(b=>{
-  b.onclick=()=>{ document.querySelectorAll('.scale-btn').forEach(x=>x.classList.remove('active')); b.classList.add('active'); currentScale=parseInt(b.dataset.scale); };
+  b.onclick=()=>{
+    document.querySelectorAll('.scale-btn').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    currentScale=parseInt(b.dataset.scale);
+  };
 });
-document.getElementById('quality').oninput=function(){ document.getElementById('quality-val').textContent=this.value; };
+document.getElementById('quality').oninput=function(){document.getElementById('quality-val').textContent=this.value;};
 
 // ===== ファイル受け取り =====
 const dz=document.getElementById('drop-zone');
-dz.addEventListener('dragover',e=>{ e.preventDefault(); dz.classList.add('drag'); });
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag');});
 dz.addEventListener('dragleave',()=>dz.classList.remove('drag'));
-dz.addEventListener('drop',e=>{ e.preventDefault(); dz.classList.remove('drag'); handleFiles([...e.dataTransfer.files]); });
+dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('drag');handleFiles([...e.dataTransfer.files]);});
 document.getElementById('file-input').onchange=e=>handleFiles([...e.target.files]);
 document.getElementById('file-btn').onchange=e=>handleFiles([...e.target.files]);
 
 async function handleFiles(files){
-  hideError();
+  hideError();hideWarn();
   for(const f of files){
     if(/\.pdf$/i.test(f.name)||f.type==='application/pdf') await loadPdf(f);
     else if(/\.tiff?$/i.test(f.name)) await loadTiff(f);
@@ -360,6 +542,23 @@ async function handleFiles(files){
   if(queue.length===0) return;
   renderQueueUI();
   updateRunBtn();
+}
+
+// ===== サイズチェック =====
+function checkOutputSize(w,h,scale){
+  const outW=w*scale, outH=h*scale;
+  const longSide=Math.max(outW,outH);
+  const mp=(outW*outH)/1000000;
+  if(mp>MAX_MEGAPIXELS){
+    return {ok:false,msg:`処理後の画素数が${mp.toFixed(0)}MP になります（上限 ${MAX_MEGAPIXELS}MP）。倍率を下げるか、元画像を小さくしてください。`};
+  }
+  if(longSide>MAX_LONG_SIDE){
+    return {ok:false,msg:`処理後の長辺が ${longSide}px になります（上限 ${MAX_LONG_SIDE}px）。ブラウザが停止する可能性があるため、倍率を下げてください。`};
+  }
+  if(longSide>8000){
+    return {ok:true,warn:`処理後のサイズが非常に大きくなります（${outW}×${outH}px）。処理に時間がかかる場合があります。`};
+  }
+  return {ok:true};
 }
 
 // ===== 画像ロード =====
@@ -376,12 +575,12 @@ async function loadImage(file){
       const img=new Image();
       img.onload=()=>{
         const c=document.createElement('canvas');
-        c.width=img.naturalWidth; c.height=img.naturalHeight;
+        c.width=img.naturalWidth;c.height=img.naturalHeight;
         c.getContext('2d').drawImage(img,0,0);
-        queue.push({name:file.name, canvas:c, dataUrl:e.target.result, exifData, status:'wait', resultUrl:null, resultCanvas:null});
+        queue.push({name:file.name,canvas:c,dataUrl:e.target.result,exifData,status:'wait',resultUrl:null,resultCanvas:null});
         resolve();
       };
-      img.onerror=()=>{ showError(file.name+'の読み込みに失敗しました'); resolve(); };
+      img.onerror=()=>{showError(file.name+'の読み込みに失敗しました');resolve();};
       img.src=e.target.result;
     };
     reader.readAsDataURL(file);
@@ -394,95 +593,87 @@ async function loadTiff(file){
     const reader=new FileReader();
     reader.onload=e=>{
       try{
-        const buf=e.target.result, uint8=new Uint8Array(buf);
-        const isLE=uint8[0]===0x49, view=new DataView(buf);
+        const buf=e.target.result,uint8=new Uint8Array(buf);
+        const isLE=uint8[0]===0x49,view=new DataView(buf);
         const u16=o=>isLE?view.getUint16(o,true):view.getUint16(o,false);
         const u32=o=>isLE?view.getUint32(o,true):view.getUint32(o,false);
-        const ifdOff=u32(4), n=u16(ifdOff);
+        const ifdOff=u32(4),n=u16(ifdOff);
         let W=0,H=0,comp=1,sOff=[],rps=0,sByt=[],spp=3;
         const rv=(off,t)=>t===3?u16(off):u32(off);
-        const mv=(cnt,t,vo)=>{ if(cnt===1) return [rv(vo,t)]; const p=u32(vo),a=[]; for(let j=0;j<cnt;j++) a.push(rv(p+j*(t===3?2:4),t)); return a; };
+        const mv=(cnt,t,vo)=>{if(cnt===1)return[rv(vo,t)];const p=u32(vo),a=[];for(let j=0;j<cnt;j++)a.push(rv(p+j*(t===3?2:4),t));return a;};
         for(let i=0;i<n;i++){
-          const b=ifdOff+2+i*12, tag=u16(b), t=u16(b+2), cnt=u32(b+4), vo=b+8;
-          if(tag===256) W=rv(vo,t);
-          else if(tag===257) H=rv(vo,t);
-          else if(tag===259) comp=rv(vo,t);
-          else if(tag===273) sOff=mv(cnt,t,vo);
-          else if(tag===277) spp=rv(vo,t);
-          else if(tag===278) rps=rv(vo,t);
-          else if(tag===279) sByt=mv(cnt,t,vo);
+          const b=ifdOff+2+i*12,tag=u16(b),t=u16(b+2),cnt=u32(b+4),vo=b+8;
+          if(tag===256)W=rv(vo,t);else if(tag===257)H=rv(vo,t);
+          else if(tag===259)comp=rv(vo,t);else if(tag===273)sOff=mv(cnt,t,vo);
+          else if(tag===277)spp=rv(vo,t);else if(tag===278)rps=rv(vo,t);
+          else if(tag===279)sByt=mv(cnt,t,vo);
         }
-        if(comp!==1&&comp!==32773){ showError('このTIFFの圧縮形式には非対応です'); resolve(); return; }
-        const c=document.createElement('canvas'); c.width=W; c.height=H;
-        const ctx=c.getContext('2d'), id=ctx.createImageData(W,H), px=id.data;
+        if(comp!==1&&comp!==32773){showError(file.name+': このTIFF形式（圧縮形式'+comp+'）には対応していません。非圧縮TIFFをお試しください。');resolve();return;}
+        const c=document.createElement('canvas');c.width=W;c.height=H;
+        const ctx=c.getContext('2d'),id=ctx.createImageData(W,H),px=id.data;
         let pi=0;
         for(let s=0;s<sOff.length;s++){
           let d=uint8.slice(sOff[s],sOff[s]+sByt[s]);
-          if(comp===32773) d=unpackBits(d);
-          let bp=0;
-          const rows=rps?Math.min(rps,H-s*rps):H;
-          for(let r=0;r<rows;r++){
-            for(let col=0;col<W;col++){
-              if(spp===1){ const v=d[bp++]; px[pi*4]=v; px[pi*4+1]=v; px[pi*4+2]=v; px[pi*4+3]=255; }
-              else{ px[pi*4]=d[bp++]; px[pi*4+1]=d[bp++]; px[pi*4+2]=d[bp++]; px[pi*4+3]=spp===4?d[bp++]:255; }
-              pi++;
-            }
-          }
+          if(comp===32773)d=unpackBits(d);
+          let bp=0;const rows=rps?Math.min(rps,H-s*rps):H;
+          for(let r=0;r<rows;r++){for(let col=0;col<W;col++){
+            if(spp===1){const v=d[bp++];px[pi*4]=v;px[pi*4+1]=v;px[pi*4+2]=v;px[pi*4+3]=255;}
+            else{px[pi*4]=d[bp++];px[pi*4+1]=d[bp++];px[pi*4+2]=d[bp++];px[pi*4+3]=spp===4?d[bp++]:255;}
+            pi++;
+          }}
         }
         ctx.putImageData(id,0,0);
         const dataUrl=c.toDataURL('image/png');
-        queue.push({name:file.name, canvas:c, dataUrl, exifData:null, status:'wait', resultUrl:null, resultCanvas:null});
+        queue.push({name:file.name,canvas:c,dataUrl,exifData:null,status:'wait',resultUrl:null,resultCanvas:null});
         resolve();
-      }catch(err){ showError('TIFF読込エラー: '+err.message); resolve(); }
+      }catch(err){showError(file.name+' TIFF読込エラー: '+err.message);resolve();}
     };
     reader.readAsArrayBuffer(file);
   });
 }
 
 function unpackBits(input){
-  const out=[]; let i=0;
-  while(i<input.length){
-    const n=input[i]>127?input[i]-256:input[i]; i++;
-    if(n>=0){ for(let j=0;j<=n&&i<input.length;j++) out.push(input[i++]); }
-    else if(n>-128){ const v=input[i++]; for(let j=0;j<=-n+1;j++) out.push(v); }
+  const out=[];let i=0;
+  while(i<input.length){const n=input[i]>127?input[i]-256:input[i];i++;
+    if(n>=0){for(let j=0;j<=n&&i<input.length;j++)out.push(input[i++]);}
+    else if(n>-128){const v=input[i++];for(let j=0;j<=-n+1;j++)out.push(v);}
   }
   return new Uint8Array(out);
 }
 
 // ===== PDFロード =====
 async function loadPdf(file){
-  if(typeof pdfjsLib==='undefined'){ showError('PDF.jsの読み込みに失敗しました。ページをリロードしてください。'); return; }
+  if(typeof pdfjsLib==='undefined'){showError('PDF.jsの読み込みに失敗しました。ページをリロードしてください。');return;}
   let pdf;
   try{
-    const arrBuf=await file.arrayBuffer();
-    pdf=await pdfjsLib.getDocument({data:arrBuf}).promise;
-  }catch(e){ showError('PDFの読み込みに失敗しました: '+e.message); return; }
-
-  const pagesToLoad=document.getElementById('opt-pdf-all').checked ? pdf.numPages : 1;
+    pdf=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise;
+  }catch(e){showError('PDFの読み込みに失敗しました: '+e.message);return;}
+  if(pdf.numPages>20){
+    showWarn('このPDFは'+pdf.numPages+'ページあります。全ページ処理するとブラウザが重くなる場合があります。');
+  }
+  const pagesToLoad=document.getElementById('opt-pdf-all').checked?pdf.numPages:1;
   for(let p=1;p<=pagesToLoad;p++){
     try{
       const page=await pdf.getPage(p);
       const vp=page.getViewport({scale:2.0});
       const c=document.createElement('canvas');
-      c.width=Math.floor(vp.width); c.height=Math.floor(vp.height);
+      c.width=Math.floor(vp.width);c.height=Math.floor(vp.height);
       await page.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
       const dataUrl=c.toDataURL('image/png');
       const pageName=file.name.replace(/\.pdf$/i,`_p${String(p).padStart(2,'0')}.png`);
-      queue.push({name:pageName, canvas:c, dataUrl, exifData:null, status:'wait', resultUrl:null, resultCanvas:null, isPdfPage:true});
-    }catch(e){ showError(`PDF p${p} 読込エラー: `+e.message); }
+      queue.push({name:pageName,canvas:c,dataUrl,exifData:null,status:'wait',resultUrl:null,resultCanvas:null,isPdfPage:true});
+    }catch(e){showError(`PDFページ${p}の読み込みエラー: `+e.message);}
   }
 }
 
 // ===== キューUI =====
 function renderQueueUI(){
-  const first=queue[0];
-  if(!first) return;
+  const first=queue[0];if(!first)return;
   document.getElementById('upload-area-wrap').style.display='none';
   document.getElementById('preview-area').style.display='block';
   document.getElementById('in-img').src=first.dataUrl;
   document.getElementById('in-badge').textContent=first.name+' · '+first.canvas.width+'×'+first.canvas.height;
   originalFileName=first.name.replace(/\.[^.]+$/,'');
-
   if(queue.length>1){
     document.getElementById('batch-queue').classList.add('show');
     document.getElementById('in-count').textContent=queue.length+'ファイル';
@@ -490,20 +681,18 @@ function renderQueueUI(){
   }
   rebuildQueueList();
 }
-
 function rebuildQueueList(){
-  const list=document.getElementById('queue-list'); list.innerHTML='';
+  const list=document.getElementById('queue-list');list.innerHTML='';
   queue.forEach((f,i)=>{
-    const div=document.createElement('div'); div.className='qi'; div.id='qi'+i;
+    const div=document.createElement('div');div.className='qi';div.id='qi'+i;
     const cls=f.status==='done'?'done':f.status==='proc'?'proc':'wait';
     const ch=f.status==='done'?'✓':f.status==='proc'?'⟳':'○';
     div.innerHTML=`<span class="qi-icon ${cls}">${ch}</span><span class="qi-name">${f.name}</span><span class="qi-info">${f.canvas.width}×${f.canvas.height}</span>`;
     list.appendChild(div);
   });
 }
-
 function updateQI(i){
-  const f=queue[i], el=document.getElementById('qi'+i); if(!el) return;
+  const f=queue[i],el=document.getElementById('qi'+i);if(!el)return;
   const cls=f.status==='done'?'done':f.status==='proc'?'proc':'wait';
   const ch=f.status==='done'?'✓':f.status==='proc'?'⟳':'○';
   el.querySelector('.qi-icon').className='qi-icon '+cls;
@@ -514,349 +703,465 @@ function updateQI(i){
 document.getElementById('btn-run').onclick=()=>runAll();
 
 async function runAll(){
-  if(queue.length===0) return;
+  if(queue.length===0)return;
+
+  // FIX⑥: 全ファイルに対してサイズチェック
+  if(currentMode==='upscale'){
+    hideWarn();
+    for(const item of queue){
+      const check=checkOutputSize(item.canvas.width,item.canvas.height,currentScale);
+      if(!check.ok){showError(item.name+': '+check.msg);return;}
+    }
+    // 警告は最大サイズのファイルに対して出す
+    const largest=queue.reduce((a,b)=>a.canvas.width*a.canvas.height>b.canvas.width*b.canvas.height?a:b);
+    const warnCheck=checkOutputSize(largest.canvas.width,largest.canvas.height,currentScale);
+    if(warnCheck.warn) showWarn(largest.name+': '+warnCheck.warn);
+  }
+
   const btn=document.getElementById('btn-run');
-  btn.disabled=true; btn.textContent='処理中...';
+  btn.disabled=true;btn.textContent='処理中...';
   hideError();
 
-  for(let i=0;i<queue.length;i++){
-    queue[i].status='proc'; rebuildQueueList();
-    showProgress(0,(queue.length>1?`[${i+1}/${queue.length}] `:'')+queue[i].name);
-    await sleep(8);
-    const result=await processItem(queue[i],i,queue.length);
-    queue[i].resultUrl=result.dataUrl;
-    queue[i].resultCanvas=result.canvas;
-    queue[i].status='done';
-    if(queue.length>1) updateQI(i);
-    document.getElementById('batch-label').textContent=`${i+1}/${queue.length} 完了`;
-    document.getElementById('batch-label').classList.add('show');
+  const tryAI=(engineState==='ai-webgpu'||engineState==='ai-wasm')&&currentMode==='upscale';
+  let lastActualMode='fallback';
+
+  try{
+    for(let i=0;i<queue.length;i++){
+      queue[i].status='proc';rebuildQueueList();
+      showProgress(0,(queue.length>1?`[${i+1}/${queue.length}] `:'')+queue[i].name);
+      await sleep(8);
+      const result=await processItem(queue[i],i,queue.length,tryAI);
+      queue[i].resultUrl=result.dataUrl;
+      queue[i].resultCanvas=result.canvas;
+      queue[i].actualMode=result.actualMode;
+      queue[i].status='done';
+      if(queue.length>1)updateQI(i);
+      lastActualMode=result.actualMode;
+      document.getElementById('batch-label').textContent=`${i+1}/${queue.length} 完了`;
+      document.getElementById('batch-label').classList.add('show');
+    }
+
+    hideProgress();
+    const last=queue[queue.length-1];
+    showOutput(last.resultUrl,last.dataUrl,last.resultCanvas.width,last.resultCanvas.height,last.actualMode);
+    showPrintCard(last.resultCanvas.width,last.resultCanvas.height);
+
+    document.getElementById('btn-dl').classList.add('show');
+    if(queue.length>1)document.getElementById('btn-zip').classList.add('show');
+    if(document.getElementById('opt-pdf-merge').checked&&queue.some(f=>f.isPdfPage))
+      document.getElementById('btn-pdf').classList.add('show');
+
+  }catch(e){
+    hideProgress();
+    showError('処理中に予期しないエラーが発生しました: '+e.message);
+    console.error('[SAKASU Upscaler] runAll error:',e);
+  }finally{
+    // エラー時も必ずボタンを復元する
+    btn.disabled=false;btn.textContent='▶ 高画質化する';updateRunBtn();
   }
-
-  hideProgress();
-
-  // FIX③: 最後に処理したアイテム自身のinputDataUrlを比較スライダーに使う
-  const last=queue[queue.length-1];
-  const outW=last.resultCanvas.width;
-  const outH=last.resultCanvas.height;
-  showOutput(last.resultUrl, last.dataUrl, outW, outH);
-  showPrintCard(outW, outH);
-
-  document.getElementById('btn-dl').classList.add('show');
-  if(queue.length>1) document.getElementById('btn-zip').classList.add('show');
-  if(document.getElementById('opt-pdf-merge').checked && queue.some(f=>f.isPdfPage)){
-    document.getElementById('btn-pdf').classList.add('show');
-  }
-
-  btn.disabled=false; btn.textContent='▶ 高画質化する'; updateRunBtn();
 }
 
-async function processItem(item,qIdx,total){
-  const sw=item.canvas.width, sh=item.canvas.height;
-  const scale=currentMode==='denoise'?1:currentScale;
-  const dw=sw*scale, dh=sh*scale;
-  const outC=document.createElement('canvas'); outC.width=dw; outC.height=dh;
+async function processItem(item,qIdx,total,tryAI){
+  const sw=item.canvas.width,sh=item.canvas.height;
+  const scale=currentMode==='sharpen'?1:currentScale;
+  const dw=sw*scale,dh=sh*scale;
+  const outC=document.createElement('canvas');outC.width=dw;outC.height=dh;
   const outCtx=outC.getContext('2d');
-  const srcCtx=item.canvas.getContext('2d');
-  const TILE=64;
-  const tot=Math.ceil(sw/TILE)*Math.ceil(sh/TILE);
-  let done=0;
+  let actualMode='fallback';
 
-  for(let ty=0;ty<sh;ty+=TILE){
-    for(let tx=0;tx<sw;tx+=TILE){
-      const tw=Math.min(TILE,sw-tx), th=Math.min(TILE,sh-ty);
-      const td=srcCtx.getImageData(tx,ty,tw,th);
-      let proc;
-      if(currentMode==='denoise'){
-        proc=applySharpening(td,tw,th);
-      }else{
-        proc=applySharpening(bicubicUpscale(td,tw,th,scale),tw*scale,th*scale);
-      }
-      outCtx.putImageData(proc,tx*scale,ty*scale);
-      done++;
-      showProgress(
-        Math.round((qIdx/total)*100+(done/tot)*(100/total)),
-        (total>1?`[${qIdx+1}/${total}] `:'')+`タイル ${done}/${tot}`
-      );
-      if(done%8===0) await sleep(0);
-    }
+  if(currentMode==='sharpen'){
+    const srcCtx=item.canvas.getContext('2d');
+    const imgData=srcCtx.getImageData(0,0,sw,sh);
+    outCtx.putImageData(applySharpening(imgData,sw,sh),0,0);
+    outCtx.putImageData(applyLocalContrast(outCtx.getImageData(0,0,sw,sh),sw,sh),0,0);
+    actualMode='sharpen';
+  }else if(tryAI&&onnxSession){
+    // FIX②: processWithAI がタイルカウントを返す
+    const{aiTiles,fbTiles}=await processWithAI(item.canvas,outC,outCtx,sw,sh,scale,qIdx,total);
+    if(fbTiles===0&&aiTiles>0) actualMode='ai-full';
+    else if(aiTiles>0) actualMode='ai-partial';
+    else actualMode='fallback';
+  }else{
+    await processWithBicubic(item.canvas,outC,outCtx,sw,sh,scale,qIdx,total);
+    actualMode='fallback';
   }
-
-  // ローカルコントラスト
-  outCtx.putImageData(applyLocalContrast(outCtx.getImageData(0,0,dw,dh),dw,dh),0,0);
 
   const mime=currentFmt==='jpeg'?'image/jpeg':currentFmt==='webp'?'image/webp':'image/png';
   const quality=parseInt(document.getElementById('quality').value)/100;
-  let dataUrl=outC.toDataURL(mime,quality);
 
-  // EXIFデータ保持（JPEGのみ）
-  if(document.getElementById('opt-exif').checked && item.exifData && currentFmt==='jpeg'){
-    try{ dataUrl=piexif.insert(piexif.dump(item.exifData),dataUrl); }catch(_){}
+  // 透明PNG → JPEG/WebP 出力時に警告（JPEGはアルファ非対応で黒塗りになる）
+  if(currentFmt==='jpeg'&&item.canvas){
+    const srcCtx=item.canvas.getContext('2d');
+    const sampleData=srcCtx.getImageData(0,0,item.canvas.width,item.canvas.height);
+    if(checkHasTransparency(sampleData)){
+      showWarn('透明PNG を JPEG 出力すると透明部分が黒くなります。透明を保持したい場合は PNG または WebP を選択してください。');
+    }
   }
-  return {dataUrl, canvas:outC};
+
+  let dataUrl=outC.toDataURL(mime,quality);
+  if(document.getElementById('opt-exif').checked&&item.exifData&&currentFmt==='jpeg'){
+    try{dataUrl=piexif.insert(piexif.dump(item.exifData),dataUrl);}catch(_){}
+  }
+  return{dataUrl,canvas:outC,actualMode};
+}
+
+// ===== AI超解像処理（ONNX Real-ESRGAN タイル処理）=====
+async function processWithAI(srcCanvas,outCanvas,outCtx,sw,sh,userScale,qIdx,total){
+  // FIX①: モデルは常に detectedModelScale（通常4）倍出力
+  const MS=detectedModelScale;
+  const TILE=engineState==='ai-webgpu'?128:64;
+  const OVERLAP=engineState==='ai-webgpu'?16:8;
+
+  const srcCtx=srcCanvas.getContext('2d');
+  const tilesX=Math.ceil(sw/TILE);
+  const tilesY=Math.ceil(sh/TILE);
+  const totalTiles=tilesX*tilesY;
+  let aiTiles=0,fbTiles=0;
+
+  // FIX①: x4中間キャンバス（常にMS倍）
+  const x4W=sw*MS,x4H=sh*MS;
+  const x4C=document.createElement('canvas');x4C.width=x4W;x4C.height=x4H;
+  const x4Ctx=x4C.getContext('2d');
+
+  // FIX⑤: 透明PNG対応 — アルファチャンネルを先に抽出・拡大
+  const srcImgData=srcCtx.getImageData(0,0,sw,sh);
+  const hasAlpha=checkHasTransparency(srcImgData);
+  let alphaX4Canvas=null;
+  if(hasAlpha){
+    alphaX4Canvas=upscaleAlphaChannel(srcImgData,sw,sh,MS);
+  }
+
+  let doneTiles=0;
+  for(let ty=0;ty<tilesY;ty++){
+    for(let tx=0;tx<tilesX;tx++){
+      // ソースタイル座標（overlap込み）
+      const srcX=Math.max(0,tx*TILE-OVERLAP);
+      const srcY=Math.max(0,ty*TILE-OVERLAP);
+      const srcX2=Math.min(sw,(tx+1)*TILE+OVERLAP);
+      const srcY2=Math.min(sh,(ty+1)*TILE+OVERLAP);
+      const tileW=srcX2-srcX;
+      const tileH=srcY2-srcY;
+
+      const tileData=srcCtx.getImageData(srcX,srcY,tileW,tileH);
+
+      // ONNX推論（RGBのみ、アルファは別処理）
+      let upscaledData;
+      try{
+        upscaledData=await runOnnxTile(tileData,tileW,tileH);
+        aiTiles++;
+      }catch(e){
+        // FIX②: 失敗タイルをカウントし、bicubicで補間（MS倍で）
+        upscaledData=bicubicUpscale(tileData,tileW,tileH,MS);
+        fbTiles++;
+      }
+
+      // FIX①: cropはMS（モデル出力倍率）で計算
+      // 有効領域 = ソース空間で [tx*TILE, min(sw,(tx+1)*TILE)]
+      const padLeft=tx*TILE-srcX;            // 左overlap実量
+      const padTop=ty*TILE-srcY;             // 上overlap実量
+      const validSrcW=Math.min(TILE,sw-tx*TILE);  // 有効ソース幅
+      const validSrcH=Math.min(TILE,sh-ty*TILE);  // 有効ソース高
+
+      const cropX=padLeft*MS;
+      const cropY=padTop*MS;
+      const cropW=validSrcW*MS;
+      const cropH=validSrcH*MS;
+      const dstX=tx*TILE*MS;
+      const dstY=ty*TILE*MS;
+
+      if(cropW>0&&cropH>0){
+        const tmpC=document.createElement('canvas');
+        tmpC.width=upscaledData.width;tmpC.height=upscaledData.height;
+        tmpC.getContext('2d').putImageData(upscaledData,0,0);
+        const cropC=document.createElement('canvas');
+        cropC.width=cropW;cropC.height=cropH;
+        cropC.getContext('2d').drawImage(tmpC,cropX,cropY,cropW,cropH,0,0,cropW,cropH);
+        x4Ctx.drawImage(cropC,dstX,dstY);
+      }
+
+      doneTiles++;
+      const pct=Math.round((qIdx/total)*100+(doneTiles/totalTiles)*(100/total));
+      showProgress(pct,(total>1?`[${qIdx+1}/${total}] `:'')+'AI推論: タイル '+doneTiles+'/'+totalTiles);
+      if(doneTiles%4===0)await sleep(0);
+    }
+  }
+
+  // FIX⑤: アルファを合成
+  if(hasAlpha&&alphaX4Canvas){
+    mergeAlphaChannel(x4C,alphaX4Canvas,x4W,x4H);
+  }
+
+  // FIX①: userScaleがMS（4）でない場合は最終リサイズ（×2/×3）
+  const finalW=sw*userScale,finalH=sh*userScale;
+  outCanvas.width=finalW;outCanvas.height=finalH;
+  outCtx.drawImage(x4C,0,0,finalW,finalH);
+
+  return{aiTiles,fbTiles};
+}
+
+// FIX⑤: 透明度チェック
+function checkHasTransparency(imgData){
+  const d=imgData.data;
+  for(let i=3;i<d.length;i+=4){if(d[i]<255)return true;}
+  return false;
+}
+
+// FIX⑤: アルファチャンネルをRGB画像として抽出しバイキュービック拡大
+function upscaleAlphaChannel(srcImgData,sw,sh,scale){
+  const alphaImg=new ImageData(sw,sh);
+  const src=srcImgData.data,dst=alphaImg.data;
+  for(let i=0;i<sw*sh;i++){
+    const a=src[i*4+3];
+    dst[i*4]=a;dst[i*4+1]=a;dst[i*4+2]=a;dst[i*4+3]=255;
+  }
+  const upscaled=bicubicUpscale(alphaImg,sw,sh,scale);
+  const c=document.createElement('canvas');
+  c.width=sw*scale;c.height=sh*scale;
+  c.getContext('2d').putImageData(upscaled,0,0);
+  return c;
+}
+
+// FIX⑤: 拡大済みアルファをRGBキャンバスに合成
+function mergeAlphaChannel(rgbCanvas,alphaCanvas,w,h){
+  const ctx=rgbCanvas.getContext('2d');
+  const rgbData=ctx.getImageData(0,0,w,h);
+  const alphaData=alphaCanvas.getContext('2d').getImageData(0,0,w,h);
+  for(let i=0;i<w*h;i++){
+    rgbData.data[i*4+3]=alphaData.data[i*4]; // Rチャンネル = アルファ値
+  }
+  ctx.putImageData(rgbData,0,0);
+}
+
+// ONNX 1タイル推論（RGBのみ、出力はRGBA・A=255）
+async function runOnnxTile(imageData,w,h){
+  const pixels=imageData.data;
+  const floatData=new Float32Array(3*h*w);
+  for(let y=0;y<h;y++){
+    for(let x=0;x<w;x++){
+      const si=(y*w+x)*4,ti=y*w+x;
+      floatData[ti]        =pixels[si]  /255.0; // R
+      floatData[h*w+ti]    =pixels[si+1]/255.0; // G
+      floatData[2*h*w+ti]  =pixels[si+2]/255.0; // B
+    }
+  }
+  const inputName=onnxSession.inputNames[0];
+  const results=await onnxSession.run({[inputName]:new ort.Tensor('float32',floatData,[1,3,h,w])});
+  const output=results[onnxSession.outputNames[0]];
+  const outData=output.data;
+  const[,,outH,outW]=output.dims;
+  const imgData=new ImageData(outW,outH);
+  const imgPixels=imgData.data;
+  for(let y=0;y<outH;y++){
+    for(let x=0;x<outW;x++){
+      const ti=y*outW+x,si=ti*4;
+      imgPixels[si]  =Math.max(0,Math.min(255,Math.round(outData[ti]*255)));
+      imgPixels[si+1]=Math.max(0,Math.min(255,Math.round(outData[outH*outW+ti]*255)));
+      imgPixels[si+2]=Math.max(0,Math.min(255,Math.round(outData[2*outH*outW+ti]*255)));
+      imgPixels[si+3]=255; // アルファは別途 mergeAlphaChannel で上書き
+    }
+  }
+  return imgData;
+}
+
+// ===== 高品質補間処理（フォールバック）=====
+async function processWithBicubic(srcCanvas,outCanvas,outCtx,sw,sh,scale,qIdx,total){
+  const TILE=64;
+  const srcCtx=srcCanvas.getContext('2d');
+  const tot=Math.ceil(sw/TILE)*Math.ceil(sh/TILE);
+  let done=0;
+  for(let ty=0;ty<sh;ty+=TILE){
+    for(let tx=0;tx<sw;tx+=TILE){
+      const tw=Math.min(TILE,sw-tx),th=Math.min(TILE,sh-ty);
+      const td=srcCtx.getImageData(tx,ty,tw,th);
+      outCtx.putImageData(applySharpening(bicubicUpscale(td,tw,th,scale),tw*scale,th*scale),tx*scale,ty*scale);
+      done++;
+      showProgress(Math.round((qIdx/total)*100+(done/tot)*(100/total)),(total>1?`[${qIdx+1}/${total}] `:'')+'補間処理: '+done+'/'+tot);
+      if(done%8===0)await sleep(0);
+    }
+  }
+  outCtx.putImageData(applyLocalContrast(outCtx.getImageData(0,0,sw*scale,sh*scale),sw*scale,sh*scale),0,0);
 }
 
 // ===== 画像処理アルゴリズム =====
 function bicubicUpscale(imageData,sw,sh,scale){
-  const dw=sw*scale, dh=sh*scale, src=imageData.data, dst=new Uint8ClampedArray(dw*dh*4);
-  const cb=t=>{ const a=-0.5,at=Math.abs(t); if(at<1) return(a+2)*at*at*at-(a+3)*at*at+1; if(at<2) return a*at*at*at-5*a*at*at+8*a*at-4*a; return 0; };
+  const dw=sw*scale,dh=sh*scale,src=imageData.data,dst=new Uint8ClampedArray(dw*dh*4);
+  const cb=t=>{const a=-0.5,at=Math.abs(t);if(at<1)return(a+2)*at*at*at-(a+3)*at*at+1;if(at<2)return a*at*at*at-5*a*at*at+8*a*at-4*a;return 0;};
   for(let dy=0;dy<dh;dy++){
-    const fy=(dy+.5)/scale-.5, iy=Math.floor(fy);
+    const fy=(dy+.5)/scale-.5,iy=Math.floor(fy);
     for(let dx=0;dx<dw;dx++){
-      const fx=(dx+.5)/scale-.5, ix=Math.floor(fx);
+      const fx=(dx+.5)/scale-.5,ix=Math.floor(fx);
       let r=0,g=0,b=0,a=0,w=0;
       for(let ky=-1;ky<=2;ky++){
-        const sy=Math.max(0,Math.min(sh-1,iy+ky)), wy=cb(fy-sy);
+        const sy=Math.max(0,Math.min(sh-1,iy+ky)),wy=cb(fy-sy);
         for(let kx=-1;kx<=2;kx++){
-          const sx=Math.max(0,Math.min(sw-1,ix+kx)), ww=wy*cb(fx-sx), si=(sy*sw+sx)*4;
-          r+=src[si]*ww; g+=src[si+1]*ww; b+=src[si+2]*ww; a+=src[si+3]*ww; w+=ww;
+          const sx=Math.max(0,Math.min(sw-1,ix+kx)),ww=wy*cb(fx-sx),si=(sy*sw+sx)*4;
+          r+=src[si]*ww;g+=src[si+1]*ww;b+=src[si+2]*ww;a+=src[si+3]*ww;w+=ww;
         }
       }
       const di=(dy*dw+dx)*4;
-      dst[di]=Math.round(r/w); dst[di+1]=Math.round(g/w); dst[di+2]=Math.round(b/w); dst[di+3]=Math.round(a/w);
+      dst[di]=Math.round(r/w);dst[di+1]=Math.round(g/w);dst[di+2]=Math.round(b/w);dst[di+3]=Math.round(a/w);
     }
   }
   return new ImageData(dst,dw,dh);
 }
 
 function applySharpening(imageData,w,h){
-  const src=new Uint8ClampedArray(imageData.data), dst=new Uint8ClampedArray(src.length);
+  const src=new Uint8ClampedArray(imageData.data),dst=new Uint8ClampedArray(src.length);
   const k=[0,-0.5,0,-0.5,3,-0.5,0,-0.5,0];
-  for(let y=0;y<h;y++){
-    for(let x=0;x<w;x++){
-      let r=0,g=0,b=0;
-      for(let ky=-1;ky<=1;ky++){
-        for(let kx=-1;kx<=1;kx++){
-          const sy=Math.max(0,Math.min(h-1,y+ky)), sx=Math.max(0,Math.min(w-1,x+kx));
-          const kv=k[(ky+1)*3+(kx+1)], si=(sy*w+sx)*4;
-          r+=src[si]*kv; g+=src[si+1]*kv; b+=src[si+2]*kv;
-        }
-      }
-      const di=(y*w+x)*4;
-      dst[di]=Math.max(0,Math.min(255,Math.round(r)));
-      dst[di+1]=Math.max(0,Math.min(255,Math.round(g)));
-      dst[di+2]=Math.max(0,Math.min(255,Math.round(b)));
-      dst[di+3]=src[di+3];
-    }
-  }
+  for(let y=0;y<h;y++){for(let x=0;x<w;x++){
+    let r=0,g=0,b=0;
+    for(let ky=-1;ky<=1;ky++){for(let kx=-1;kx<=1;kx++){
+      const sy=Math.max(0,Math.min(h-1,y+ky)),sx=Math.max(0,Math.min(w-1,x+kx));
+      const kv=k[(ky+1)*3+(kx+1)],si=(sy*w+sx)*4;
+      r+=src[si]*kv;g+=src[si+1]*kv;b+=src[si+2]*kv;
+    }}
+    const di=(y*w+x)*4;
+    dst[di]=Math.max(0,Math.min(255,Math.round(r)));dst[di+1]=Math.max(0,Math.min(255,Math.round(g)));
+    dst[di+2]=Math.max(0,Math.min(255,Math.round(b)));dst[di+3]=src[di+3];
+  }}
   return new ImageData(dst,w,h);
 }
 
 function applyLocalContrast(imageData,w,h){
-  const d=imageData.data, out=new Uint8ClampedArray(d), s=0.15;
+  const d=imageData.data,out=new Uint8ClampedArray(d),s=0.12;
   for(let i=0;i<d.length;i+=4){
     const l=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
     const f=1+s*(l>128?1:-1)*Math.abs(l-128)/128;
-    out[i]=Math.max(0,Math.min(255,d[i]*f));
-    out[i+1]=Math.max(0,Math.min(255,d[i+1]*f));
-    out[i+2]=Math.max(0,Math.min(255,d[i+2]*f));
-    out[i+3]=d[i+3];
+    out[i]=Math.max(0,Math.min(255,d[i]*f));out[i+1]=Math.max(0,Math.min(255,d[i+1]*f));
+    out[i+2]=Math.max(0,Math.min(255,d[i+2]*f));out[i+3]=d[i+3];
   }
   return new ImageData(out,w,h);
 }
 
-// ===== 出力表示・比較スライダー =====
-function showOutput(resultUrl, inputUrl, w, h){
+// ===== 出力表示 =====
+// FIX②: actualMode で正直に処理方式を表示
+// actualMode: 'ai-full' | 'ai-partial' | 'fallback' | 'sharpen'
+function showOutput(resultUrl,inputUrl,w,h,actualMode){
   document.getElementById('out-placeholder').style.display='none';
   document.getElementById('out-preview').style.display='block';
 
   const tag=document.getElementById('out-tag');
-  tag.textContent=w+'×'+h+' '+(currentMode==='denoise'?'(ノイズ除去)':'(×'+currentScale+')');
+  let modeLabel, tagClass;
+  if(actualMode==='ai-full'){
+    modeLabel=`AI超解像 ×${currentScale}`;
+    tagClass='ai';
+  }else if(actualMode==='ai-partial'){
+    modeLabel=`AI超解像（一部補間フォールバックあり）×${currentScale}`;
+    tagClass='fb';
+  }else if(actualMode==='sharpen'){
+    modeLabel='輪郭くっきり補正';
+    tagClass='fb';
+  }else{
+    modeLabel=`高品質補間 ×${currentScale}`;
+    tagClass='fb';
+  }
+  tag.textContent=w+'×'+h+' · '+modeLabel;
+  tag.className='out-tag '+tagClass;
   tag.style.display='inline-block';
 
   const outImg=document.getElementById('out-img');
   const beforeImg=document.getElementById('cmp-before');
-
-  // FIX②: before画像をoutput画像と同じDataURLサイズで表示するため
-  // out-imgをobject-fit:containで表示 → overlayをout-imgと完全に同じ幅/高さに揃える
   outImg.src=resultUrl;
-
-  // beforeはinputDataUrl（元画像）を使う — 拡大していないので別途 canvas でリサイズ
-  // outputと同じ表示サイズになるよう、beforeもoutputと同解像度にリサイズして表示
   const tmpC=document.createElement('canvas');
-  tmpC.width=w; tmpC.height=h;
-  const tmpCtx=tmpC.getContext('2d');
+  tmpC.width=w;tmpC.height=h;
   const tmpImg=new Image();
   tmpImg.onload=()=>{
-    tmpCtx.drawImage(tmpImg,0,0,w,h);
+    tmpC.getContext('2d').drawImage(tmpImg,0,0,w,h);
     beforeImg.src=tmpC.toDataURL('image/jpeg',0.85);
     initCompareSlider();
   };
   tmpImg.src=inputUrl;
 }
 
-// FIX: グローバルで1度だけリスナーを登録し、重複を防ぐ
-let _cmpDrag=false;
-let _cmpOuter=null, _cmpOverlay=null, _cmpLine=null;
-let _cmpListenersAttached=false;
-
-function _cmpSetPos(p){
-  const pct=Math.max(2,Math.min(98,p));
-  if(_cmpOverlay) _cmpOverlay.style.width=pct+'%';
-  if(_cmpLine){ _cmpLine.style.left=pct+'%'; _cmpLine.style.transform='translateX(-50%)'; }
-}
-
-function initCompareSlider(){
-  _cmpOuter=document.getElementById('compare-outer');
-  _cmpOverlay=document.getElementById('cmp-overlay');
-  _cmpLine=document.getElementById('cmp-line');
-  _cmpDrag=false;
-  _cmpSetPos(50);
-
-  // document/outerへのリスナーは最初の1回だけ登録
-  if(!_cmpListenersAttached){
-    _cmpListenersAttached=true;
-
-    document.addEventListener('mousemove',e=>{
-      if(!_cmpDrag||!_cmpOuter) return;
-      const r=_cmpOuter.getBoundingClientRect();
-      _cmpSetPos(((e.clientX-r.left)/r.width)*100);
-    });
-    document.addEventListener('mouseup',()=>{ _cmpDrag=false; });
-    document.addEventListener('touchmove',e=>{
-      if(!_cmpDrag||!_cmpOuter) return;
-      const r=_cmpOuter.getBoundingClientRect();
-      _cmpSetPos(((e.touches[0].clientX-r.left)/r.width)*100);
-    },{passive:true});
-    document.addEventListener('touchend',()=>{ _cmpDrag=false; });
-  }
-
-  // lineへのmousedown/touchstartはクローンで毎回リセット（重複防止）
-  const newLine=_cmpLine.cloneNode(true);
-  _cmpLine.parentNode.replaceChild(newLine,_cmpLine);
-  _cmpLine=newLine;
-
-  _cmpLine.addEventListener('mousedown',e=>{ _cmpDrag=true; e.preventDefault(); });
-  _cmpLine.addEventListener('touchstart',e=>{ _cmpDrag=true; e.preventDefault(); },{passive:false});
-  _cmpSetPos(50);
-}
-
 // ===== ダウンロード =====
 document.getElementById('btn-dl').onclick=()=>{
-  const last=queue.find(f=>f.resultUrl&&f===queue[queue.length-1])||queue.find(f=>f.resultUrl);
-  if(!last) return;
-  const sfx=currentMode==='denoise'?'_denoised':'_x'+currentScale;
-  const a=document.createElement('a'); a.href=last.resultUrl;
-  a.download=originalFileName+sfx+'.'+currentFmt; a.click();
+  const last=queue[queue.length-1];if(!last||!last.resultUrl)return;
+  const sfx=currentMode==='sharpen'?'_sharpen':'_x'+currentScale;
+  const a=document.createElement('a');a.href=last.resultUrl;
+  a.download=originalFileName+sfx+'.'+currentFmt;a.click();
 };
 
 document.getElementById('btn-zip').onclick=async()=>{
   const btn=document.getElementById('btn-zip');
-  btn.textContent='ZIP作成中...'; btn.disabled=true;
+  btn.textContent='ZIP作成中...';btn.disabled=true;
   try{
     const zip=new JSZip();
-    const sfx=currentMode==='denoise'?'_denoised':'_x'+currentScale;
+    const sfx=currentMode==='sharpen'?'_sharpen':'_x'+currentScale;
     for(const f of queue){
-      if(!f.resultUrl) continue;
-      zip.file(f.name.replace(/\.[^.]+$/,'')+sfx+'.'+currentFmt, f.resultUrl.split(',')[1],{base64:true});
+      if(!f.resultUrl)continue;
+      zip.file(f.name.replace(/\.[^.]+$/,'')+sfx+'.'+currentFmt,f.resultUrl.split(',')[1],{base64:true});
     }
     const blob=await zip.generateAsync({type:'blob'});
-    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='upscaled.zip'; a.click();
-  }catch(e){ showError('ZIP作成エラー: '+e.message); }
-  btn.textContent='↓ まとめてDL (ZIP)'; btn.disabled=false;
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='upscaled.zip';a.click();
+  }catch(e){showError('ZIP作成エラー: '+e.message);}
+  btn.textContent='↓ まとめてDL (ZIP)';btn.disabled=false;
 };
 
 document.getElementById('btn-pdf').onclick=async()=>{
   const btn=document.getElementById('btn-pdf');
-  btn.textContent='PDF生成中...'; btn.disabled=true;
+  btn.textContent='PDF生成中...';btn.disabled=true;
   try{
     const pages=queue.filter(f=>f.resultCanvas);
-    if(pages.length===0){ btn.textContent='↓ 結合PDF でDL'; btn.disabled=false; return; }
-    const pdfBytes=buildPdf(pages);
+    if(pages.length===0){btn.textContent='↓ 結合PDF でDL';btn.disabled=false;return;}
     const a=document.createElement('a');
-    a.href=URL.createObjectURL(new Blob([pdfBytes],{type:'application/pdf'}));
-    a.download='upscaled_merged.pdf'; a.click();
-  }catch(e){ showError('PDF生成エラー: '+e.message); }
-  btn.textContent='↓ 結合PDF でDL'; btn.disabled=false;
+    a.href=URL.createObjectURL(new Blob([buildPdf(pages)],{type:'application/pdf'}));
+    a.download='upscaled_merged.pdf';a.click();
+  }catch(e){showError('PDF生成エラー: '+e.message);}
+  btn.textContent='↓ 結合PDF でDL';btn.disabled=false;
 };
 
-// ===== PDF生成 (FIX②: オブジェクトIDを連番で確実に管理) =====
+// ===== PDF生成 =====
 function buildPdf(pages){
-  // 各ページのJPEGデータを準備
   const imgs=pages.map(p=>{
     const jpeg=p.resultCanvas.toDataURL('image/jpeg',0.92).split(',')[1];
-    const raw=atob(jpeg);
-    const bytes=new Uint8Array(raw.length);
-    for(let i=0;i<raw.length;i++) bytes[i]=raw.charCodeAt(i);
-    return {bytes, w:p.resultCanvas.width, h:p.resultCanvas.height};
+    const raw=atob(jpeg);const bytes=new Uint8Array(raw.length);
+    for(let i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);
+    return{bytes,w:p.resultCanvas.width,h:p.resultCanvas.height};
   });
-
   const n=pages.length;
-  // オブジェクト割り当て（連番・衝突なし）
-  // 1: カタログ, 2: Pagesノード
-  // 3+i*3: Pageオブジェクト (i=0..n-1)
-  // 3+i*3+1: 画像XObject
-  // 3+i*3+2: コンテンツストリーム
-  const OBJ_CATALOG=1;
-  const OBJ_PAGES=2;
-  const pageObjId=i=>3+i*3;
-  const imgObjId=i=>3+i*3+1;
-  const cntObjId=i=>3+i*3+2;
-  const maxObjId=2+n*3;        // 存在するオブジェクトの最大ID
-  const xrefSize=maxObjId+1;   // xrefエントリ数（0番含む）
-
+  const pageObjId=i=>3+i*3;const imgObjId=i=>3+i*3+1;const cntObjId=i=>3+i*3+2;
+  const maxObjId=2+n*3;const xrefSize=maxObjId+1;
   const enc=s=>new TextEncoder().encode(s);
-  const parts=[];
-  const offsets=new Array(xrefSize).fill(0); // index = object ID
-  let pos=0;
-
-  const add=b=>{ parts.push(b); pos+=b.length; };
-
+  const parts=[];const offsets=new Array(xrefSize).fill(0);let pos=0;
+  const add=b=>{parts.push(b);pos+=b.length;};
   add(enc('%PDF-1.4\n'));
-
-  // obj 1: カタログ
-  offsets[OBJ_CATALOG]=pos;
-  add(enc(`1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`));
-
-  // obj 2: Pages
-  offsets[OBJ_PAGES]=pos;
+  offsets[1]=pos;add(enc('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n'));
+  offsets[2]=pos;
   const kids=Array.from({length:n},(_,i)=>pageObjId(i)+' 0 R').join(' ');
   add(enc(`2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${n} >>\nendobj\n`));
-
   for(let i=0;i<n;i++){
-    const {w,h}=imgs[i];
-    const ptW=(w/96*72).toFixed(2), ptH=(h/96*72).toFixed(2);
-
-    // Pageオブジェクト
+    const{w,h}=imgs[i];const ptW=(w/96*72).toFixed(2),ptH=(h/96*72).toFixed(2);
     offsets[pageObjId(i)]=pos;
     add(enc(`${pageObjId(i)} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${ptW} ${ptH}]\n/Resources << /XObject << /Im${i} ${imgObjId(i)} 0 R >> >>\n/Contents ${cntObjId(i)} 0 R >>\nendobj\n`));
-
-    // 画像XObject
     offsets[imgObjId(i)]=pos;
-    const hdr=enc(`${imgObjId(i)} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h}\n/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${imgs[i].bytes.length} >>\nstream\n`);
-    add(hdr); add(imgs[i].bytes); add(enc('\nendstream\nendobj\n'));
-
-    // コンテンツストリーム
+    add(enc(`${imgObjId(i)} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h}\n/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${imgs[i].bytes.length} >>\nstream\n`));
+    add(imgs[i].bytes);add(enc('\nendstream\nendobj\n'));
     offsets[cntObjId(i)]=pos;
     const cm=`q ${ptW} 0 0 ${ptH} 0 0 cm /Im${i} Do Q`;
     add(enc(`${cntObjId(i)} 0 obj\n<< /Length ${cm.length} >>\nstream\n${cm}\nendstream\nendobj\n`));
   }
-
-  // xref テーブル
   const xrefPos=pos;
   let xref=`xref\n0 ${xrefSize}\n0000000000 65535 f \n`;
-  for(let id=1;id<xrefSize;id++){
-    xref+=String(offsets[id]).padStart(10,'0')+' 00000 n \n';
-  }
+  for(let id=1;id<xrefSize;id++)xref+=String(offsets[id]).padStart(10,'0')+' 00000 n \n';
   add(enc(xref));
   add(enc(`trailer\n<< /Size ${xrefSize} /Root 1 0 R >>\nstartxref\n${xrefPos}\n%%EOF\n`));
-
   const total=parts.reduce((s,p)=>s+p.length,0);
-  const out=new Uint8Array(total); let p2=0;
-  for(const p of parts){ out.set(p,p2); p2+=p.length; }
+  const out=new Uint8Array(total);let p2=0;
+  for(const p of parts){out.set(p,p2);p2+=p.length;}
   return out;
 }
 
 // ===== 印刷耐性 =====
 function showPrintCard(pw,ph){
   const results=PRINT_SIZES.map(s=>({...s,dpi:Math.round(Math.min((pw/s.w)*25.4,(ph/s.h)*25.4))}));
-  const grid=document.getElementById('print-grid'); grid.innerHTML='';
-  let bestIdx=-1, bestDpi=0;
-  results.forEach((r,i)=>{ if(r.dpi>=200&&r.dpi>bestDpi){ bestDpi=r.dpi; bestIdx=i; } });
+  const grid=document.getElementById('print-grid');grid.innerHTML='';
+  let bestIdx=-1,bestDpi=0;
+  results.forEach((r,i)=>{if(r.dpi>=200&&r.dpi>bestDpi){bestDpi=r.dpi;bestIdx=i;}});
   results.forEach((r,i)=>{
     const cls=r.dpi>=300?'best':r.dpi>=200?'good':r.dpi>=120?'ok':'tight';
     const lbl=r.dpi>=300?'高画質OK':r.dpi>=200?'通常印刷OK':r.dpi>=120?'ラフ可':'厳しい';
-    const div=document.createElement('div'); div.className='pi '+cls;
-    if(i===bestIdx) div.innerHTML='<div class="pi-rec">推奨</div>';
+    const div=document.createElement('div');div.className='pi '+cls;
+    if(i===bestIdx)div.innerHTML='<div class="pi-rec">推奨</div>';
     div.innerHTML+=`<div class="pi-name">${r.name}</div><div class="pi-mm">${r.w}×${r.h}mm</div><div class="pi-dpi">${r.dpi}dpi · ${lbl}</div>`;
     grid.appendChild(div);
   });
@@ -869,30 +1174,29 @@ function showPrintCard(pw,ph){
 // ===== リセット =====
 function resetAll(){
   queue=[];
-  ['upload-area-wrap','btn-dl','btn-zip','btn-pdf'].forEach(id=>{
-    const el=document.getElementById(id);
-    if(id==='upload-area-wrap') el.style.display='block';
-    else el.classList.remove('show');
-  });
+  document.getElementById('upload-area-wrap').style.display='block';
   document.getElementById('preview-area').style.display='none';
   document.getElementById('out-placeholder').style.display='flex';
   document.getElementById('out-preview').style.display='none';
   document.getElementById('out-tag').style.display='none';
+  ['btn-dl','btn-zip','btn-pdf'].forEach(id=>document.getElementById(id).classList.remove('show'));
   document.getElementById('batch-queue').classList.remove('show');
   document.getElementById('batch-label').classList.remove('show');
   document.getElementById('print-card').classList.remove('show');
   document.getElementById('in-count').style.display='none';
   document.getElementById('file-input').value='';
   document.getElementById('file-btn').value='';
-  hideError(); updateRunBtn();
+  hideError();hideWarn();updateRunBtn();
 }
 
-function updateRunBtn(){ document.getElementById('btn-run').disabled=!(modelReady&&queue.length>0); }
-function showProgress(pct,msg){ document.getElementById('progress-wrap').classList.add('show'); document.getElementById('pb').style.width=pct+'%'; document.getElementById('pb-text').textContent=msg; }
-function hideProgress(){ document.getElementById('progress-wrap').classList.remove('show'); }
-function showError(msg){ const e=document.getElementById('error-msg'); e.textContent=msg; e.classList.add('show'); }
-function hideError(){ document.getElementById('error-msg').classList.remove('show'); }
-function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+function updateRunBtn(){document.getElementById('btn-run').disabled=!(engineState!=='loading'&&queue.length>0);}
+function showProgress(pct,msg){document.getElementById('progress-wrap').classList.add('show');document.getElementById('pb').style.width=pct+'%';document.getElementById('pb-text').textContent=msg;}
+function hideProgress(){document.getElementById('progress-wrap').classList.remove('show');}
+function showError(msg){const e=document.getElementById('error-msg');e.textContent=msg;e.classList.add('show');}
+function hideError(){document.getElementById('error-msg').classList.remove('show');}
+function showWarn(msg){const e=document.getElementById('warn-msg');e.textContent=msg;e.classList.add('show');}
+function hideWarn(){document.getElementById('warn-msg').classList.remove('show');}
+function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
 </script>
 </body>
 </html>
