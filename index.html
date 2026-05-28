@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI UPSCALE — SAKASU ORIGINAL</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;500;700;800&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://unpkg.com/piexifjs@1.0.6/piexif.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0a0a;--surface:#111111;--surface2:#1a1a1a;--border:#2a2a2a;
+  --accent:#c8ff00;--accent2:#00ffb3;--text:#f0f0f0;--muted:#666;
+  --danger:#ff5555;
+}
+body{background:var(--bg);color:var(--text);font-family:'Syne',sans-serif;min-height:100vh;padding:36px 28px 60px;overflow-x:hidden;max-width:1100px;margin:0 auto}
+
+.header{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:8px}
+h1{font-size:clamp(30px,5vw,54px);font-weight:800;letter-spacing:-2px;line-height:1}
+h1 span{color:var(--accent)}
+.brand{font-family:'DM Mono',monospace;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);border:1px solid var(--border);border-radius:6px;padding:5px 12px;white-space:nowrap;margin-bottom:6px}
+.brand em{color:var(--accent);font-style:normal}
+.sub{font-family:'DM Mono',monospace;font-size:12px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;margin-bottom:28px}
+
+.model-status{display:flex;align-items:center;gap:8px;font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);margin-bottom:24px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--border);flex-shrink:0}
+.dot.loading{background:var(--accent);animation:blink 1s infinite}
+.dot.ready{background:var(--accent2)}
+.dot.error{background:var(--danger)}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.25}}
+
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:24px;position:relative;overflow:hidden}
+.panel::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(200,255,0,0.22),transparent)}
+.panel-label{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.panel-label::after{content:'';flex:1;height:1px;background:var(--border)}
+
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+@media(max-width:720px){.grid{grid-template-columns:1fr}}
+
+/* アップロード */
+.upload-area{border:2px dashed var(--border);border-radius:12px;padding:28px 20px;text-align:center;cursor:pointer;transition:all 0.2s;position:relative;min-height:160px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}
+.upload-area:hover,.upload-area.drag{border-color:var(--accent);background:rgba(200,255,0,0.025)}
+.upload-area>input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.upload-row{display:flex;align-items:center;gap:12px}
+.upload-icon{width:44px;height:44px;border-radius:10px;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0}
+.upload-title{font-weight:700;font-size:15px;text-align:left}
+.select-btn{display:inline-block;background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:6px 14px;font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);cursor:pointer;transition:all 0.15s;position:relative;overflow:hidden;margin-top:5px}
+.select-btn:hover{border-color:var(--accent);color:var(--accent)}
+.select-btn input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.fmt-row{display:flex;flex-wrap:wrap;gap:4px;justify-content:center}
+.fmt-tag{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1px;border:1px solid var(--border);border-radius:4px;padding:2px 7px;color:var(--muted)}
+.fmt-tag.img{border-color:rgba(200,255,0,0.3);color:rgba(200,255,0,0.65)}
+.fmt-tag.doc{border-color:rgba(0,255,179,0.3);color:rgba(0,255,179,0.65)}
+
+/* プレビュー */
+.preview-wrap{position:relative;border-radius:12px;overflow:hidden;background:#000;min-height:160px;display:flex;align-items:center;justify-content:center}
+.preview-wrap img{max-width:100%;max-height:320px;object-fit:contain;display:block}
+.img-badge{position:absolute;bottom:8px;left:8px;background:rgba(0,0,0,0.78);border-radius:5px;padding:3px 9px;font-family:'DM Mono',monospace;font-size:10px;color:#fff}
+.reset-btn{margin-top:8px;background:none;border:1px solid var(--border);border-radius:6px;padding:6px 14px;font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);cursor:pointer;width:100%;transition:all 0.15s}
+.reset-btn:hover{border-color:var(--accent);color:var(--accent)}
+
+/* コントロール */
+.controls{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:22px 24px;margin-bottom:16px}
+.ctrl-row{display:flex;align-items:flex-end;gap:20px;flex-wrap:wrap}
+.ctrl-group{display:flex;flex-direction:column;gap:7px}
+.ctrl-label{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--muted)}
+
+.seg{display:flex;border:1px solid var(--border);border-radius:9px;overflow:hidden;background:var(--surface2)}
+.seg-btn{flex:1;padding:8px 4px;font-family:'DM Mono',monospace;font-size:10px;letter-spacing:0.5px;text-align:center;cursor:pointer;color:var(--muted);transition:all 0.15s;border:none;background:none;white-space:nowrap}
+.seg-btn.active{background:var(--surface);color:var(--text);font-weight:500}
+.seg-btn:hover:not(.active){color:var(--text)}
+.seg-btn small{display:block;font-size:8px;opacity:0.5;margin-top:1px;letter-spacing:0}
+
+.scale-btns{display:flex;gap:6px;flex-wrap:wrap}
+.scale-btn{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:7px 15px;font-family:'Syne',sans-serif;font-weight:700;font-size:14px;color:var(--muted);cursor:pointer;transition:all 0.15s}
+.scale-btn.active{background:var(--accent);border-color:var(--accent);color:#000}
+.scale-btn:hover:not(.active){border-color:var(--accent);color:var(--accent)}
+.scale-note{font-size:8px;opacity:0.55;display:block;font-weight:400}
+
+/* FIX①: display重複をなくす */
+.jpeg-row{display:none;align-items:center;gap:12px;margin-top:14px}
+.jpeg-row.show{display:flex}
+input[type=range]{flex:1;accent-color:var(--accent)}
+.range-val{font-family:'DM Mono',monospace;font-size:12px;min-width:28px;text-align:right}
+
+.options-row{display:flex;flex-wrap:wrap;gap:16px;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)}
+.opt-check{display:flex;align-items:center;gap:7px;cursor:pointer;font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);user-select:none}
+.opt-check input{accent-color:var(--accent);width:14px;height:14px;cursor:pointer}
+.opt-check:hover{color:var(--text)}
+.opt-check.highlight{color:var(--accent2)}
+
+.btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px;align-items:center}
+.btn-main{background:var(--accent);border:none;border-radius:10px;padding:13px 28px;font-family:'Syne',sans-serif;font-weight:800;font-size:15px;color:#000;cursor:pointer;transition:all 0.15s;letter-spacing:-0.5px;white-space:nowrap}
+.btn-main:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(200,255,0,0.2)}
+.btn-main:active{transform:translateY(0)}
+.btn-main:disabled{background:var(--border);color:var(--muted);cursor:not-allowed;transform:none;box-shadow:none}
+.btn-sub{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:13px 20px;font-family:'Syne',sans-serif;font-weight:700;font-size:13px;color:var(--muted);cursor:pointer;transition:all 0.15s;white-space:nowrap;display:none}
+.btn-sub.show{display:block}
+.btn-sub:hover{border-color:var(--accent2);color:var(--accent2)}
+.btn-sub:disabled{opacity:0.5;cursor:not-allowed}
+.batch-label{font-family:'DM Mono',monospace;font-size:11px;color:var(--accent);margin-left:auto;display:none}
+.batch-label.show{display:block}
+
+.progress-wrap{margin-top:14px;display:none}
+.progress-wrap.show{display:block}
+.pb-bg{height:3px;background:var(--border);border-radius:2px;overflow:hidden}
+.pb{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:2px;width:0%;transition:width 0.2s}
+.pb-text{font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);margin-top:6px}
+
+.error-msg{background:rgba(255,85,85,0.08);border:1px solid rgba(255,85,85,0.3);border-radius:8px;padding:10px 14px;font-family:'DM Mono',monospace;font-size:12px;color:var(--danger);margin-top:10px;display:none}
+.error-msg.show{display:block}
+
+.out-tag{font-family:'DM Mono',monospace;font-size:10px;border-radius:5px;padding:3px 9px;margin-left:auto;background:rgba(0,255,179,0.07);border:1px solid rgba(0,255,179,0.28);color:var(--accent2);display:none}
+
+/* 比較スライダー */
+.compare-outer{position:relative;border-radius:12px;overflow:hidden;background:#000;user-select:none;line-height:0}
+.compare-outer .out-img{display:block;width:100%;max-height:340px;object-fit:contain}
+.compare-overlay{position:absolute;top:0;left:0;height:100%;overflow:hidden;width:50%;pointer-events:none}
+/* FIX①: before画像はoutput画像と同じ表示幅に合わせる必要がある */
+.compare-overlay img{display:block;width:100%;max-height:340px;object-fit:contain;position:absolute;top:0;left:0}
+.compare-line{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);cursor:col-resize;z-index:10;left:50%;transform:translateX(-50%);display:flex;align-items:center;justify-content:center}
+.compare-handle{width:28px;height:28px;border-radius:50%;background:var(--accent);color:#000;font-size:13px;font-weight:800;display:flex;align-items:center;justify-content:center;margin-left:-13px;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,0.5)}
+.c-label{position:absolute;font-family:'DM Mono',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;padding:3px 7px;background:rgba(0,0,0,0.7);border-radius:4px;top:8px;z-index:5;line-height:1.4}
+.c-label.before{left:8px;color:var(--muted)}
+.c-label.after{right:8px;color:var(--accent)}
+
+.batch-queue{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:20px 24px;margin-bottom:16px;display:none}
+.batch-queue.show{display:block}
+.queue-list{display:flex;flex-direction:column;gap:6px;margin-top:12px;max-height:220px;overflow-y:auto}
+.qi{display:flex;align-items:center;gap:10px;background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:7px 12px;font-family:'DM Mono',monospace;font-size:11px}
+.qi-icon{width:18px;text-align:center;flex-shrink:0}
+.qi-icon.done{color:var(--accent2)}
+.qi-icon.proc{color:var(--accent);animation:blink 0.7s infinite}
+.qi-icon.wait{color:var(--border)}
+.qi-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.qi-info{color:var(--muted);white-space:nowrap;font-size:10px}
+
+.print-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:20px 24px;margin-bottom:16px;display:none}
+.print-card.show{display:block}
+.print-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(108px,1fr));gap:8px;margin-top:12px}
+.pi{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;position:relative}
+.pi.best{border-color:rgba(200,255,0,0.4)}
+.pi.good{border-color:rgba(0,255,179,0.28)}
+.pi.ok{border-color:rgba(255,255,255,0.08)}
+.pi.tight{border-color:rgba(255,85,85,0.28)}
+.pi-name{font-weight:800;font-size:16px;letter-spacing:-0.5px;line-height:1}
+.pi-mm{font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);margin:3px 0 5px}
+.pi-dpi{font-family:'DM Mono',monospace;font-size:9px;border-radius:4px;padding:2px 6px;display:inline-block}
+.pi.best .pi-dpi{background:rgba(200,255,0,0.09);color:var(--accent)}
+.pi.good .pi-dpi{background:rgba(0,255,179,0.07);color:var(--accent2)}
+.pi.ok .pi-dpi{background:rgba(255,255,255,0.04);color:#888}
+.pi.tight .pi-dpi{background:rgba(255,85,85,0.07);color:#ff8080}
+.pi-rec{position:absolute;top:6px;right:6px;font-family:'DM Mono',monospace;font-size:7px;letter-spacing:1px;text-transform:uppercase;background:rgba(200,255,0,0.13);color:var(--accent);border-radius:3px;padding:2px 5px}
+.print-note{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);margin-top:10px;line-height:1.7}
+
+.footer{font-family:'DM Mono',monospace;font-size:10px;color:#222;text-align:center;margin-top:48px;letter-spacing:1px}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>AI<br><span>UPSCALE</span></h1>
+  <div class="brand"><em>SAKASU</em> ORIGINAL</div>
+</div>
+<p class="sub">browser-native · no server · unlimited use</p>
+
+<div class="model-status">
+  <div class="dot loading" id="dot"></div>
+  <span id="status-text">ライブラリを読み込み中...</span>
+</div>
+
+<div class="controls">
+  <div class="ctrl-row">
+    <div class="ctrl-group">
+      <span class="ctrl-label">処理モード</span>
+      <div class="seg" style="min-width:260px">
+        <button class="seg-btn active" data-mode="upscale" onclick="setMode('upscale')">拡大＋高画質化<small>解像度アップ</small></button>
+        <button class="seg-btn" data-mode="denoise" onclick="setMode('denoise')">ノイズ除去のみ<small>シャープ処理だけ</small></button>
+      </div>
+    </div>
+    <div class="ctrl-group" id="scale-group">
+      <span class="ctrl-label">拡大倍率</span>
+      <div class="scale-btns">
+        <button class="scale-btn active" data-scale="2">×2</button>
+        <button class="scale-btn" data-scale="3">×3</button>
+        <button class="scale-btn" data-scale="4">×4</button>
+        <button class="scale-btn" data-scale="8">×8<span class="scale-note">印刷用</span></button>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <span class="ctrl-label">出力形式</span>
+      <div class="seg" style="min-width:240px">
+        <button class="seg-btn active" data-fmt="png" onclick="setFmt('png')">PNG<small>最高品質・無劣化</small></button>
+        <button class="seg-btn" data-fmt="jpeg" onclick="setFmt('jpeg')">JPEG<small>写真・高圧縮</small></button>
+        <button class="seg-btn" data-fmt="webp" onclick="setFmt('webp')">WebP<small>Web最適化</small></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="jpeg-row" id="jpeg-row">
+    <span class="ctrl-label" style="min-width:60px;white-space:nowrap">圧縮品質</span>
+    <input type="range" id="quality" min="60" max="100" value="92" step="1">
+    <span class="range-val" id="quality-val">92</span>
+  </div>
+
+  <div class="options-row">
+    <label class="opt-check highlight" style="flex-direction:column;align-items:flex-start;gap:3px">
+      <span style="display:flex;align-items:center;gap:7px"><input type="checkbox" id="opt-exif" checked> EXIFデータを保持する</span>
+      <span style="font-size:9px;color:var(--muted);padding-left:21px;line-height:1.5">撮影日時・カメラ機種・GPS位置情報など写真に埋め込まれた情報。<br>※ JPEG出力時のみ有効。PNG/WebPでは保持されません。</span>
+    </label>
+    <label class="opt-check">
+      <input type="checkbox" id="opt-pdf-all" checked> PDF: 全ページを処理する
+    </label>
+    <label class="opt-check">
+      <input type="checkbox" id="opt-pdf-merge"> PDF: 結合PDFで出力する
+    </label>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn-main" id="btn-run" disabled>▶ 高画質化する</button>
+    <button class="btn-sub" id="btn-dl">↓ ダウンロード</button>
+    <button class="btn-sub" id="btn-zip">↓ まとめてDL (ZIP)</button>
+    <button class="btn-sub" id="btn-pdf">↓ 結合PDF でDL</button>
+    <span class="batch-label" id="batch-label"></span>
+  </div>
+  <div class="progress-wrap" id="progress-wrap">
+    <div class="pb-bg"><div class="pb" id="pb"></div></div>
+    <div class="pb-text" id="pb-text">処理中...</div>
+  </div>
+  <div class="error-msg" id="error-msg"></div>
+</div>
+
+<div class="grid">
+  <div class="panel">
+    <div class="panel-label">入力 <span id="in-count" style="font-family:'DM Mono',monospace;font-size:10px;color:var(--accent);display:none"></span></div>
+    <div id="upload-area-wrap">
+      <div class="upload-area" id="drop-zone">
+        <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp,image/tiff,image/bmp,image/gif,application/pdf" multiple>
+        <div class="upload-row">
+          <div class="upload-icon">🖼</div>
+          <div>
+            <div class="upload-title">ドロップ または</div>
+            <div class="select-btn">＋ ファイルを選択<input type="file" id="file-btn" accept="image/png,image/jpeg,image/webp,image/tiff,image/bmp,image/gif,application/pdf" multiple></div>
+          </div>
+        </div>
+        <div class="fmt-row">
+          <span class="fmt-tag img">PNG</span><span class="fmt-tag img">JPG</span><span class="fmt-tag img">WebP</span>
+          <span class="fmt-tag img">TIFF</span><span class="fmt-tag img">BMP</span><span class="fmt-tag doc">PDF (全ページ)</span>
+          <span class="fmt-tag" style="color:#444">複数選択OK</span>
+        </div>
+      </div>
+    </div>
+    <div id="preview-area" style="display:none">
+      <div class="preview-wrap">
+        <img id="in-img" src="" alt="入力プレビュー">
+        <span class="img-badge" id="in-badge"></span>
+      </div>
+      <button class="reset-btn" onclick="resetAll()">✕ リセット・別のファイルを選ぶ</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-label">出力 <span class="out-tag" id="out-tag"></span></div>
+    <div id="out-placeholder" style="border:2px dashed var(--border);border-radius:12px;min-height:200px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px">
+      <div style="font-size:30px;opacity:0.18">✨</div>
+      <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">処理後に表示されます</div>
+    </div>
+    <div id="out-preview" style="display:none">
+      <!-- FIX②: compare-outerにoutput画像と同サイズでbeforeを重ねる -->
+      <div class="compare-outer" id="compare-outer">
+        <img class="out-img" id="out-img" src="" alt="出力">
+        <div class="compare-overlay" id="cmp-overlay">
+          <img id="cmp-before" src="" alt="before">
+        </div>
+        <div class="compare-line" id="cmp-line">
+          <div class="compare-handle">↔</div>
+        </div>
+        <div class="c-label before">BEFORE</div>
+        <div class="c-label after">AFTER</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="batch-queue" id="batch-queue">
+  <div class="panel-label">処理キュー</div>
+  <div class="queue-list" id="queue-list"></div>
+</div>
+
+<div class="print-card" id="print-card">
+  <div class="panel-label">印刷耐性ガイド</div>
+  <div class="print-grid" id="print-grid"></div>
+  <div class="print-note" id="print-note"></div>
+</div>
+
+<div class="footer">SAKASU ORIGINAL · Browser-native · No data leaves your device · 2025</div>
+
+<script>
+const PRINT_SIZES=[
+  {name:'名刺',w:91,h:55},{name:'L判',w:127,h:89},{name:'A6',w:148,h:105},
+  {name:'A5',w:210,h:148},{name:'A4',w:297,h:210},{name:'A3',w:420,h:297},
+  {name:'A2',w:594,h:420},{name:'B2',w:728,h:515},
+];
+
+let modelReady=false, currentMode='upscale', currentScale=2, currentFmt='png';
+// FIX③: queue各アイテムに inputDataUrl を持たせる（比較スライダー用）
+let queue=[];
+let originalFileName='image';
+
+// ===== 初期化 =====
+window.addEventListener('load', async ()=>{
+  try{
+    if(typeof pdfjsLib!=='undefined'){
+      pdfjsLib.GlobalWorkerOptions.workerSrc='https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+    }
+    await new Promise(r=>setTimeout(r,300));
+    modelReady=true;
+    setStatus('ready','エンジン準備完了 — 何枚でも処理できます');
+    updateRunBtn();
+  }catch(e){ setStatus('error','初期化エラー: '+e.message); }
+});
+
+function setStatus(t,m){ document.getElementById('dot').className='dot '+t; document.getElementById('status-text').textContent=m; }
+
+// ===== モード/フォーマット =====
+function setMode(m){
+  currentMode=m;
+  document.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));
+  const sg=document.getElementById('scale-group');
+  sg.style.opacity=m==='denoise'?'0.35':'1';
+  sg.style.pointerEvents=m==='denoise'?'none':'';
+}
+function setFmt(f){
+  currentFmt=f;
+  document.querySelectorAll('[data-fmt]').forEach(b=>b.classList.toggle('active',b.dataset.fmt===f));
+  document.getElementById('jpeg-row').classList.toggle('show',f!=='png');
+}
+document.querySelectorAll('.scale-btn').forEach(b=>{
+  b.onclick=()=>{ document.querySelectorAll('.scale-btn').forEach(x=>x.classList.remove('active')); b.classList.add('active'); currentScale=parseInt(b.dataset.scale); };
+});
+document.getElementById('quality').oninput=function(){ document.getElementById('quality-val').textContent=this.value; };
+
+// ===== ファイル受け取り =====
+const dz=document.getElementById('drop-zone');
+dz.addEventListener('dragover',e=>{ e.preventDefault(); dz.classList.add('drag'); });
+dz.addEventListener('dragleave',()=>dz.classList.remove('drag'));
+dz.addEventListener('drop',e=>{ e.preventDefault(); dz.classList.remove('drag'); handleFiles([...e.dataTransfer.files]); });
+document.getElementById('file-input').onchange=e=>handleFiles([...e.target.files]);
+document.getElementById('file-btn').onchange=e=>handleFiles([...e.target.files]);
+
+async function handleFiles(files){
+  hideError();
+  for(const f of files){
+    if(/\.pdf$/i.test(f.name)||f.type==='application/pdf') await loadPdf(f);
+    else if(/\.tiff?$/i.test(f.name)) await loadTiff(f);
+    else await loadImage(f);
+  }
+  if(queue.length===0) return;
+  renderQueueUI();
+  updateRunBtn();
+}
+
+// ===== 画像ロード =====
+async function loadImage(file){
+  return new Promise(resolve=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      let exifData=null;
+      try{
+        if(typeof piexif!=='undefined'&&(file.type==='image/jpeg'||/\.jpe?g$/i.test(file.name))){
+          exifData=piexif.load(e.target.result);
+        }
+      }catch(_){}
+      const img=new Image();
+      img.onload=()=>{
+        const c=document.createElement('canvas');
+        c.width=img.naturalWidth; c.height=img.naturalHeight;
+        c.getContext('2d').drawImage(img,0,0);
+        queue.push({name:file.name, canvas:c, dataUrl:e.target.result, exifData, status:'wait', resultUrl:null, resultCanvas:null});
+        resolve();
+      };
+      img.onerror=()=>{ showError(file.name+'の読み込みに失敗しました'); resolve(); };
+      img.src=e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// ===== TIFFロード =====
+async function loadTiff(file){
+  return new Promise(resolve=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      try{
+        const buf=e.target.result, uint8=new Uint8Array(buf);
+        const isLE=uint8[0]===0x49, view=new DataView(buf);
+        const u16=o=>isLE?view.getUint16(o,true):view.getUint16(o,false);
+        const u32=o=>isLE?view.getUint32(o,true):view.getUint32(o,false);
+        const ifdOff=u32(4), n=u16(ifdOff);
+        let W=0,H=0,comp=1,sOff=[],rps=0,sByt=[],spp=3;
+        const rv=(off,t)=>t===3?u16(off):u32(off);
+        const mv=(cnt,t,vo)=>{ if(cnt===1) return [rv(vo,t)]; const p=u32(vo),a=[]; for(let j=0;j<cnt;j++) a.push(rv(p+j*(t===3?2:4),t)); return a; };
+        for(let i=0;i<n;i++){
+          const b=ifdOff+2+i*12, tag=u16(b), t=u16(b+2), cnt=u32(b+4), vo=b+8;
+          if(tag===256) W=rv(vo,t);
+          else if(tag===257) H=rv(vo,t);
+          else if(tag===259) comp=rv(vo,t);
+          else if(tag===273) sOff=mv(cnt,t,vo);
+          else if(tag===277) spp=rv(vo,t);
+          else if(tag===278) rps=rv(vo,t);
+          else if(tag===279) sByt=mv(cnt,t,vo);
+        }
+        if(comp!==1&&comp!==32773){ showError('このTIFFの圧縮形式には非対応です'); resolve(); return; }
+        const c=document.createElement('canvas'); c.width=W; c.height=H;
+        const ctx=c.getContext('2d'), id=ctx.createImageData(W,H), px=id.data;
+        let pi=0;
+        for(let s=0;s<sOff.length;s++){
+          let d=uint8.slice(sOff[s],sOff[s]+sByt[s]);
+          if(comp===32773) d=unpackBits(d);
+          let bp=0;
+          const rows=rps?Math.min(rps,H-s*rps):H;
+          for(let r=0;r<rows;r++){
+            for(let col=0;col<W;col++){
+              if(spp===1){ const v=d[bp++]; px[pi*4]=v; px[pi*4+1]=v; px[pi*4+2]=v; px[pi*4+3]=255; }
+              else{ px[pi*4]=d[bp++]; px[pi*4+1]=d[bp++]; px[pi*4+2]=d[bp++]; px[pi*4+3]=spp===4?d[bp++]:255; }
+              pi++;
+            }
+          }
+        }
+        ctx.putImageData(id,0,0);
+        const dataUrl=c.toDataURL('image/png');
+        queue.push({name:file.name, canvas:c, dataUrl, exifData:null, status:'wait', resultUrl:null, resultCanvas:null});
+        resolve();
+      }catch(err){ showError('TIFF読込エラー: '+err.message); resolve(); }
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function unpackBits(input){
+  const out=[]; let i=0;
+  while(i<input.length){
+    const n=input[i]>127?input[i]-256:input[i]; i++;
+    if(n>=0){ for(let j=0;j<=n&&i<input.length;j++) out.push(input[i++]); }
+    else if(n>-128){ const v=input[i++]; for(let j=0;j<=-n+1;j++) out.push(v); }
+  }
+  return new Uint8Array(out);
+}
+
+// ===== PDFロード =====
+async function loadPdf(file){
+  if(typeof pdfjsLib==='undefined'){ showError('PDF.jsの読み込みに失敗しました。ページをリロードしてください。'); return; }
+  let pdf;
+  try{
+    const arrBuf=await file.arrayBuffer();
+    pdf=await pdfjsLib.getDocument({data:arrBuf}).promise;
+  }catch(e){ showError('PDFの読み込みに失敗しました: '+e.message); return; }
+
+  const pagesToLoad=document.getElementById('opt-pdf-all').checked ? pdf.numPages : 1;
+  for(let p=1;p<=pagesToLoad;p++){
+    try{
+      const page=await pdf.getPage(p);
+      const vp=page.getViewport({scale:2.0});
+      const c=document.createElement('canvas');
+      c.width=Math.floor(vp.width); c.height=Math.floor(vp.height);
+      await page.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
+      const dataUrl=c.toDataURL('image/png');
+      const pageName=file.name.replace(/\.pdf$/i,`_p${String(p).padStart(2,'0')}.png`);
+      queue.push({name:pageName, canvas:c, dataUrl, exifData:null, status:'wait', resultUrl:null, resultCanvas:null, isPdfPage:true});
+    }catch(e){ showError(`PDF p${p} 読込エラー: `+e.message); }
+  }
+}
+
+// ===== キューUI =====
+function renderQueueUI(){
+  const first=queue[0];
+  if(!first) return;
+  document.getElementById('upload-area-wrap').style.display='none';
+  document.getElementById('preview-area').style.display='block';
+  document.getElementById('in-img').src=first.dataUrl;
+  document.getElementById('in-badge').textContent=first.name+' · '+first.canvas.width+'×'+first.canvas.height;
+  originalFileName=first.name.replace(/\.[^.]+$/,'');
+
+  if(queue.length>1){
+    document.getElementById('batch-queue').classList.add('show');
+    document.getElementById('in-count').textContent=queue.length+'ファイル';
+    document.getElementById('in-count').style.display='inline';
+  }
+  rebuildQueueList();
+}
+
+function rebuildQueueList(){
+  const list=document.getElementById('queue-list'); list.innerHTML='';
+  queue.forEach((f,i)=>{
+    const div=document.createElement('div'); div.className='qi'; div.id='qi'+i;
+    const cls=f.status==='done'?'done':f.status==='proc'?'proc':'wait';
+    const ch=f.status==='done'?'✓':f.status==='proc'?'⟳':'○';
+    div.innerHTML=`<span class="qi-icon ${cls}">${ch}</span><span class="qi-name">${f.name}</span><span class="qi-info">${f.canvas.width}×${f.canvas.height}</span>`;
+    list.appendChild(div);
+  });
+}
+
+function updateQI(i){
+  const f=queue[i], el=document.getElementById('qi'+i); if(!el) return;
+  const cls=f.status==='done'?'done':f.status==='proc'?'proc':'wait';
+  const ch=f.status==='done'?'✓':f.status==='proc'?'⟳':'○';
+  el.querySelector('.qi-icon').className='qi-icon '+cls;
+  el.querySelector('.qi-icon').textContent=ch;
+}
+
+// ===== 処理実行 =====
+document.getElementById('btn-run').onclick=()=>runAll();
+
+async function runAll(){
+  if(queue.length===0) return;
+  const btn=document.getElementById('btn-run');
+  btn.disabled=true; btn.textContent='処理中...';
+  hideError();
+
+  for(let i=0;i<queue.length;i++){
+    queue[i].status='proc'; rebuildQueueList();
+    showProgress(0,(queue.length>1?`[${i+1}/${queue.length}] `:'')+queue[i].name);
+    await sleep(8);
+    const result=await processItem(queue[i],i,queue.length);
+    queue[i].resultUrl=result.dataUrl;
+    queue[i].resultCanvas=result.canvas;
+    queue[i].status='done';
+    if(queue.length>1) updateQI(i);
+    document.getElementById('batch-label').textContent=`${i+1}/${queue.length} 完了`;
+    document.getElementById('batch-label').classList.add('show');
+  }
+
+  hideProgress();
+
+  // FIX③: 最後に処理したアイテム自身のinputDataUrlを比較スライダーに使う
+  const last=queue[queue.length-1];
+  const outW=last.resultCanvas.width;
+  const outH=last.resultCanvas.height;
+  showOutput(last.resultUrl, last.dataUrl, outW, outH);
+  showPrintCard(outW, outH);
+
+  document.getElementById('btn-dl').classList.add('show');
+  if(queue.length>1) document.getElementById('btn-zip').classList.add('show');
+  if(document.getElementById('opt-pdf-merge').checked && queue.some(f=>f.isPdfPage)){
+    document.getElementById('btn-pdf').classList.add('show');
+  }
+
+  btn.disabled=false; btn.textContent='▶ 高画質化する'; updateRunBtn();
+}
+
+async function processItem(item,qIdx,total){
+  const sw=item.canvas.width, sh=item.canvas.height;
+  const scale=currentMode==='denoise'?1:currentScale;
+  const dw=sw*scale, dh=sh*scale;
+  const outC=document.createElement('canvas'); outC.width=dw; outC.height=dh;
+  const outCtx=outC.getContext('2d');
+  const srcCtx=item.canvas.getContext('2d');
+  const TILE=64;
+  const tot=Math.ceil(sw/TILE)*Math.ceil(sh/TILE);
+  let done=0;
+
+  for(let ty=0;ty<sh;ty+=TILE){
+    for(let tx=0;tx<sw;tx+=TILE){
+      const tw=Math.min(TILE,sw-tx), th=Math.min(TILE,sh-ty);
+      const td=srcCtx.getImageData(tx,ty,tw,th);
+      let proc;
+      if(currentMode==='denoise'){
+        proc=applySharpening(td,tw,th);
+      }else{
+        proc=applySharpening(bicubicUpscale(td,tw,th,scale),tw*scale,th*scale);
+      }
+      outCtx.putImageData(proc,tx*scale,ty*scale);
+      done++;
+      showProgress(
+        Math.round((qIdx/total)*100+(done/tot)*(100/total)),
+        (total>1?`[${qIdx+1}/${total}] `:'')+`タイル ${done}/${tot}`
+      );
+      if(done%8===0) await sleep(0);
+    }
+  }
+
+  // ローカルコントラスト
+  outCtx.putImageData(applyLocalContrast(outCtx.getImageData(0,0,dw,dh),dw,dh),0,0);
+
+  const mime=currentFmt==='jpeg'?'image/jpeg':currentFmt==='webp'?'image/webp':'image/png';
+  const quality=parseInt(document.getElementById('quality').value)/100;
+  let dataUrl=outC.toDataURL(mime,quality);
+
+  // EXIFデータ保持（JPEGのみ）
+  if(document.getElementById('opt-exif').checked && item.exifData && currentFmt==='jpeg'){
+    try{ dataUrl=piexif.insert(piexif.dump(item.exifData),dataUrl); }catch(_){}
+  }
+  return {dataUrl, canvas:outC};
+}
+
+// ===== 画像処理アルゴリズム =====
+function bicubicUpscale(imageData,sw,sh,scale){
+  const dw=sw*scale, dh=sh*scale, src=imageData.data, dst=new Uint8ClampedArray(dw*dh*4);
+  const cb=t=>{ const a=-0.5,at=Math.abs(t); if(at<1) return(a+2)*at*at*at-(a+3)*at*at+1; if(at<2) return a*at*at*at-5*a*at*at+8*a*at-4*a; return 0; };
+  for(let dy=0;dy<dh;dy++){
+    const fy=(dy+.5)/scale-.5, iy=Math.floor(fy);
+    for(let dx=0;dx<dw;dx++){
+      const fx=(dx+.5)/scale-.5, ix=Math.floor(fx);
+      let r=0,g=0,b=0,a=0,w=0;
+      for(let ky=-1;ky<=2;ky++){
+        const sy=Math.max(0,Math.min(sh-1,iy+ky)), wy=cb(fy-sy);
+        for(let kx=-1;kx<=2;kx++){
+          const sx=Math.max(0,Math.min(sw-1,ix+kx)), ww=wy*cb(fx-sx), si=(sy*sw+sx)*4;
+          r+=src[si]*ww; g+=src[si+1]*ww; b+=src[si+2]*ww; a+=src[si+3]*ww; w+=ww;
+        }
+      }
+      const di=(dy*dw+dx)*4;
+      dst[di]=Math.round(r/w); dst[di+1]=Math.round(g/w); dst[di+2]=Math.round(b/w); dst[di+3]=Math.round(a/w);
+    }
+  }
+  return new ImageData(dst,dw,dh);
+}
+
+function applySharpening(imageData,w,h){
+  const src=new Uint8ClampedArray(imageData.data), dst=new Uint8ClampedArray(src.length);
+  const k=[0,-0.5,0,-0.5,3,-0.5,0,-0.5,0];
+  for(let y=0;y<h;y++){
+    for(let x=0;x<w;x++){
+      let r=0,g=0,b=0;
+      for(let ky=-1;ky<=1;ky++){
+        for(let kx=-1;kx<=1;kx++){
+          const sy=Math.max(0,Math.min(h-1,y+ky)), sx=Math.max(0,Math.min(w-1,x+kx));
+          const kv=k[(ky+1)*3+(kx+1)], si=(sy*w+sx)*4;
+          r+=src[si]*kv; g+=src[si+1]*kv; b+=src[si+2]*kv;
+        }
+      }
+      const di=(y*w+x)*4;
+      dst[di]=Math.max(0,Math.min(255,Math.round(r)));
+      dst[di+1]=Math.max(0,Math.min(255,Math.round(g)));
+      dst[di+2]=Math.max(0,Math.min(255,Math.round(b)));
+      dst[di+3]=src[di+3];
+    }
+  }
+  return new ImageData(dst,w,h);
+}
+
+function applyLocalContrast(imageData,w,h){
+  const d=imageData.data, out=new Uint8ClampedArray(d), s=0.15;
+  for(let i=0;i<d.length;i+=4){
+    const l=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+    const f=1+s*(l>128?1:-1)*Math.abs(l-128)/128;
+    out[i]=Math.max(0,Math.min(255,d[i]*f));
+    out[i+1]=Math.max(0,Math.min(255,d[i+1]*f));
+    out[i+2]=Math.max(0,Math.min(255,d[i+2]*f));
+    out[i+3]=d[i+3];
+  }
+  return new ImageData(out,w,h);
+}
+
+// ===== 出力表示・比較スライダー =====
+function showOutput(resultUrl, inputUrl, w, h){
+  document.getElementById('out-placeholder').style.display='none';
+  document.getElementById('out-preview').style.display='block';
+
+  const tag=document.getElementById('out-tag');
+  tag.textContent=w+'×'+h+' '+(currentMode==='denoise'?'(ノイズ除去)':'(×'+currentScale+')');
+  tag.style.display='inline-block';
+
+  const outImg=document.getElementById('out-img');
+  const beforeImg=document.getElementById('cmp-before');
+
+  // FIX②: before画像をoutput画像と同じDataURLサイズで表示するため
+  // out-imgをobject-fit:containで表示 → overlayをout-imgと完全に同じ幅/高さに揃える
+  outImg.src=resultUrl;
+
+  // beforeはinputDataUrl（元画像）を使う — 拡大していないので別途 canvas でリサイズ
+  // outputと同じ表示サイズになるよう、beforeもoutputと同解像度にリサイズして表示
+  const tmpC=document.createElement('canvas');
+  tmpC.width=w; tmpC.height=h;
+  const tmpCtx=tmpC.getContext('2d');
+  const tmpImg=new Image();
+  tmpImg.onload=()=>{
+    tmpCtx.drawImage(tmpImg,0,0,w,h);
+    beforeImg.src=tmpC.toDataURL('image/jpeg',0.85);
+    initCompareSlider();
+  };
+  tmpImg.src=inputUrl;
+}
+
+// FIX: グローバルで1度だけリスナーを登録し、重複を防ぐ
+let _cmpDrag=false;
+let _cmpOuter=null, _cmpOverlay=null, _cmpLine=null;
+let _cmpListenersAttached=false;
+
+function _cmpSetPos(p){
+  const pct=Math.max(2,Math.min(98,p));
+  if(_cmpOverlay) _cmpOverlay.style.width=pct+'%';
+  if(_cmpLine){ _cmpLine.style.left=pct+'%'; _cmpLine.style.transform='translateX(-50%)'; }
+}
+
+function initCompareSlider(){
+  _cmpOuter=document.getElementById('compare-outer');
+  _cmpOverlay=document.getElementById('cmp-overlay');
+  _cmpLine=document.getElementById('cmp-line');
+  _cmpDrag=false;
+  _cmpSetPos(50);
+
+  // document/outerへのリスナーは最初の1回だけ登録
+  if(!_cmpListenersAttached){
+    _cmpListenersAttached=true;
+
+    document.addEventListener('mousemove',e=>{
+      if(!_cmpDrag||!_cmpOuter) return;
+      const r=_cmpOuter.getBoundingClientRect();
+      _cmpSetPos(((e.clientX-r.left)/r.width)*100);
+    });
+    document.addEventListener('mouseup',()=>{ _cmpDrag=false; });
+    document.addEventListener('touchmove',e=>{
+      if(!_cmpDrag||!_cmpOuter) return;
+      const r=_cmpOuter.getBoundingClientRect();
+      _cmpSetPos(((e.touches[0].clientX-r.left)/r.width)*100);
+    },{passive:true});
+    document.addEventListener('touchend',()=>{ _cmpDrag=false; });
+  }
+
+  // lineへのmousedown/touchstartはクローンで毎回リセット（重複防止）
+  const newLine=_cmpLine.cloneNode(true);
+  _cmpLine.parentNode.replaceChild(newLine,_cmpLine);
+  _cmpLine=newLine;
+
+  _cmpLine.addEventListener('mousedown',e=>{ _cmpDrag=true; e.preventDefault(); });
+  _cmpLine.addEventListener('touchstart',e=>{ _cmpDrag=true; e.preventDefault(); },{passive:false});
+  _cmpSetPos(50);
+}
+
+// ===== ダウンロード =====
+document.getElementById('btn-dl').onclick=()=>{
+  const last=queue.find(f=>f.resultUrl&&f===queue[queue.length-1])||queue.find(f=>f.resultUrl);
+  if(!last) return;
+  const sfx=currentMode==='denoise'?'_denoised':'_x'+currentScale;
+  const a=document.createElement('a'); a.href=last.resultUrl;
+  a.download=originalFileName+sfx+'.'+currentFmt; a.click();
+};
+
+document.getElementById('btn-zip').onclick=async()=>{
+  const btn=document.getElementById('btn-zip');
+  btn.textContent='ZIP作成中...'; btn.disabled=true;
+  try{
+    const zip=new JSZip();
+    const sfx=currentMode==='denoise'?'_denoised':'_x'+currentScale;
+    for(const f of queue){
+      if(!f.resultUrl) continue;
+      zip.file(f.name.replace(/\.[^.]+$/,'')+sfx+'.'+currentFmt, f.resultUrl.split(',')[1],{base64:true});
+    }
+    const blob=await zip.generateAsync({type:'blob'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='upscaled.zip'; a.click();
+  }catch(e){ showError('ZIP作成エラー: '+e.message); }
+  btn.textContent='↓ まとめてDL (ZIP)'; btn.disabled=false;
+};
+
+document.getElementById('btn-pdf').onclick=async()=>{
+  const btn=document.getElementById('btn-pdf');
+  btn.textContent='PDF生成中...'; btn.disabled=true;
+  try{
+    const pages=queue.filter(f=>f.resultCanvas);
+    if(pages.length===0){ btn.textContent='↓ 結合PDF でDL'; btn.disabled=false; return; }
+    const pdfBytes=buildPdf(pages);
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([pdfBytes],{type:'application/pdf'}));
+    a.download='upscaled_merged.pdf'; a.click();
+  }catch(e){ showError('PDF生成エラー: '+e.message); }
+  btn.textContent='↓ 結合PDF でDL'; btn.disabled=false;
+};
+
+// ===== PDF生成 (FIX②: オブジェクトIDを連番で確実に管理) =====
+function buildPdf(pages){
+  // 各ページのJPEGデータを準備
+  const imgs=pages.map(p=>{
+    const jpeg=p.resultCanvas.toDataURL('image/jpeg',0.92).split(',')[1];
+    const raw=atob(jpeg);
+    const bytes=new Uint8Array(raw.length);
+    for(let i=0;i<raw.length;i++) bytes[i]=raw.charCodeAt(i);
+    return {bytes, w:p.resultCanvas.width, h:p.resultCanvas.height};
+  });
+
+  const n=pages.length;
+  // オブジェクト割り当て（連番・衝突なし）
+  // 1: カタログ, 2: Pagesノード
+  // 3+i*3: Pageオブジェクト (i=0..n-1)
+  // 3+i*3+1: 画像XObject
+  // 3+i*3+2: コンテンツストリーム
+  const OBJ_CATALOG=1;
+  const OBJ_PAGES=2;
+  const pageObjId=i=>3+i*3;
+  const imgObjId=i=>3+i*3+1;
+  const cntObjId=i=>3+i*3+2;
+  const maxObjId=2+n*3;        // 存在するオブジェクトの最大ID
+  const xrefSize=maxObjId+1;   // xrefエントリ数（0番含む）
+
+  const enc=s=>new TextEncoder().encode(s);
+  const parts=[];
+  const offsets=new Array(xrefSize).fill(0); // index = object ID
+  let pos=0;
+
+  const add=b=>{ parts.push(b); pos+=b.length; };
+
+  add(enc('%PDF-1.4\n'));
+
+  // obj 1: カタログ
+  offsets[OBJ_CATALOG]=pos;
+  add(enc(`1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`));
+
+  // obj 2: Pages
+  offsets[OBJ_PAGES]=pos;
+  const kids=Array.from({length:n},(_,i)=>pageObjId(i)+' 0 R').join(' ');
+  add(enc(`2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${n} >>\nendobj\n`));
+
+  for(let i=0;i<n;i++){
+    const {w,h}=imgs[i];
+    const ptW=(w/96*72).toFixed(2), ptH=(h/96*72).toFixed(2);
+
+    // Pageオブジェクト
+    offsets[pageObjId(i)]=pos;
+    add(enc(`${pageObjId(i)} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${ptW} ${ptH}]\n/Resources << /XObject << /Im${i} ${imgObjId(i)} 0 R >> >>\n/Contents ${cntObjId(i)} 0 R >>\nendobj\n`));
+
+    // 画像XObject
+    offsets[imgObjId(i)]=pos;
+    const hdr=enc(`${imgObjId(i)} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h}\n/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${imgs[i].bytes.length} >>\nstream\n`);
+    add(hdr); add(imgs[i].bytes); add(enc('\nendstream\nendobj\n'));
+
+    // コンテンツストリーム
+    offsets[cntObjId(i)]=pos;
+    const cm=`q ${ptW} 0 0 ${ptH} 0 0 cm /Im${i} Do Q`;
+    add(enc(`${cntObjId(i)} 0 obj\n<< /Length ${cm.length} >>\nstream\n${cm}\nendstream\nendobj\n`));
+  }
+
+  // xref テーブル
+  const xrefPos=pos;
+  let xref=`xref\n0 ${xrefSize}\n0000000000 65535 f \n`;
+  for(let id=1;id<xrefSize;id++){
+    xref+=String(offsets[id]).padStart(10,'0')+' 00000 n \n';
+  }
+  add(enc(xref));
+  add(enc(`trailer\n<< /Size ${xrefSize} /Root 1 0 R >>\nstartxref\n${xrefPos}\n%%EOF\n`));
+
+  const total=parts.reduce((s,p)=>s+p.length,0);
+  const out=new Uint8Array(total); let p2=0;
+  for(const p of parts){ out.set(p,p2); p2+=p.length; }
+  return out;
+}
+
+// ===== 印刷耐性 =====
+function showPrintCard(pw,ph){
+  const results=PRINT_SIZES.map(s=>({...s,dpi:Math.round(Math.min((pw/s.w)*25.4,(ph/s.h)*25.4))}));
+  const grid=document.getElementById('print-grid'); grid.innerHTML='';
+  let bestIdx=-1, bestDpi=0;
+  results.forEach((r,i)=>{ if(r.dpi>=200&&r.dpi>bestDpi){ bestDpi=r.dpi; bestIdx=i; } });
+  results.forEach((r,i)=>{
+    const cls=r.dpi>=300?'best':r.dpi>=200?'good':r.dpi>=120?'ok':'tight';
+    const lbl=r.dpi>=300?'高画質OK':r.dpi>=200?'通常印刷OK':r.dpi>=120?'ラフ可':'厳しい';
+    const div=document.createElement('div'); div.className='pi '+cls;
+    if(i===bestIdx) div.innerHTML='<div class="pi-rec">推奨</div>';
+    div.innerHTML+=`<div class="pi-name">${r.name}</div><div class="pi-mm">${r.w}×${r.h}mm</div><div class="pi-dpi">${r.dpi}dpi · ${lbl}</div>`;
+    grid.appendChild(div);
+  });
+  const ok300=results.filter(r=>r.dpi>=300).map(r=>r.name);
+  const ok200=results.filter(r=>r.dpi>=200&&r.dpi<300).map(r=>r.name);
+  document.getElementById('print-note').textContent='出力: '+pw+'×'+ph+'px'+(ok300.length?' · 高画質(300dpi+): '+ok300.join(', '):'')+(ok200.length?' · 通常(200dpi+): '+ok200.join(', '):'');
+  document.getElementById('print-card').classList.add('show');
+}
+
+// ===== リセット =====
+function resetAll(){
+  queue=[];
+  ['upload-area-wrap','btn-dl','btn-zip','btn-pdf'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(id==='upload-area-wrap') el.style.display='block';
+    else el.classList.remove('show');
+  });
+  document.getElementById('preview-area').style.display='none';
+  document.getElementById('out-placeholder').style.display='flex';
+  document.getElementById('out-preview').style.display='none';
+  document.getElementById('out-tag').style.display='none';
+  document.getElementById('batch-queue').classList.remove('show');
+  document.getElementById('batch-label').classList.remove('show');
+  document.getElementById('print-card').classList.remove('show');
+  document.getElementById('in-count').style.display='none';
+  document.getElementById('file-input').value='';
+  document.getElementById('file-btn').value='';
+  hideError(); updateRunBtn();
+}
+
+function updateRunBtn(){ document.getElementById('btn-run').disabled=!(modelReady&&queue.length>0); }
+function showProgress(pct,msg){ document.getElementById('progress-wrap').classList.add('show'); document.getElementById('pb').style.width=pct+'%'; document.getElementById('pb-text').textContent=msg; }
+function hideProgress(){ document.getElementById('progress-wrap').classList.remove('show'); }
+function showError(msg){ const e=document.getElementById('error-msg'); e.textContent=msg; e.classList.add('show'); }
+function hideError(){ document.getElementById('error-msg').classList.remove('show'); }
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+</script>
+</body>
+</html>
