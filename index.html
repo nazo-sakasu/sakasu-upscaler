@@ -224,6 +224,23 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 .pdf-accordion-body{display:none;flex-direction:column;gap:10px;margin-top:10px}
 .pdf-accordion-body.open{display:flex}
 
+/* 重い処理警告モーダル */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.72);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;display:none}
+.modal-overlay.open{display:flex}
+.modal-box{background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:28px 28px 24px;max-width:440px;width:100%;position:relative;box-shadow:0 24px 64px rgba(0,0,0,0.6)}
+.modal-box::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,170,68,0.5),transparent);border-radius:18px 18px 0 0}
+.modal-icon{font-size:28px;margin-bottom:12px}
+.modal-title{font-weight:800;font-size:18px;letter-spacing:-0.5px;margin-bottom:8px;color:var(--text)}
+.modal-body{font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);line-height:1.8;margin-bottom:20px}
+.modal-body .modal-stat{color:var(--warn);font-weight:500}
+.modal-btns{display:flex;flex-direction:column;gap:8px}
+.modal-btn-continue{background:var(--warn);border:none;border-radius:9px;padding:11px;font-family:'Syne',sans-serif;font-weight:700;font-size:13px;color:#000;cursor:pointer;transition:all 0.15s}
+.modal-btn-continue:hover{filter:brightness(1.1)}
+.modal-btn-bicubic{background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:11px;font-family:'Syne',sans-serif;font-weight:700;font-size:13px;color:var(--text);cursor:pointer;transition:all 0.15s}
+.modal-btn-bicubic:hover{border-color:var(--accent2);color:var(--accent2)}
+.modal-btn-cancel{background:none;border:none;padding:8px;font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);cursor:pointer;transition:color 0.15s}
+.modal-btn-cancel:hover{color:var(--text)}
+
 .footer{font-family:'DM Mono',monospace;font-size:10px;color:#222;text-align:center;margin-top:48px;letter-spacing:1px;line-height:1.8}
 </style>
 </head>
@@ -456,6 +473,22 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 <div class="footer">
   SAKASU ORIGINAL · 画像データは外部サーバーに送信されません · 2025<br>
   AIモデル使用時: AI超解像 / Real-ESRGAN · 非対応時: 高品質補間モードで処理
+</div>
+
+<!-- AI重い処理警告モーダル -->
+<div class="modal-overlay" id="heavy-modal">
+  <div class="modal-box">
+    <div class="modal-icon">⚠️</div>
+    <div class="modal-title">処理に時間がかかる可能性があります</div>
+    <div class="modal-body" id="heavy-modal-body">
+      <!-- JSで動的に内容を設定 -->
+    </div>
+    <div class="modal-btns">
+      <button class="modal-btn-continue" id="modal-btn-continue">このままAI超解像で続行する</button>
+      <button class="modal-btn-bicubic" id="modal-btn-bicubic">高品質補間に切り替えて処理する</button>
+      <button class="modal-btn-cancel" id="modal-btn-cancel">キャンセル</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -895,6 +928,60 @@ function updateQI(i){
   el.querySelector('.qi-icon').textContent=ch;
 }
 
+// ===== AIタイル数計算・重い処理チェック =====
+function calcTileCount(w,h){
+  const TW=modelInputW||128, TH=modelInputH||128;
+  return Math.ceil(w/TW)*Math.ceil(h/TH);
+}
+
+function shouldWarnHeavyAI(item){
+  // WASM環境 + AIモード選択時のみ警告
+  if(engineState!=='ai-wasm') return null;
+  if(currentMode!=='ai') return null;
+  const{width:w,height:h}=item.canvas;
+  const tiles=calcTileCount(w,h);
+  const longSide=Math.max(w,h);
+  const isHeavy=
+    tiles>=50 ||
+    longSide>=1200 ||
+    (currentScale>=3&&tiles>=25);
+  if(isHeavy){
+    return{tiles,longSide,scale:currentScale};
+  }
+  return null;
+}
+
+// モーダルを表示してユーザーの選択を Promise で返す
+// resolve: 'continue' | 'bicubic' | 'cancel'
+function showHeavyModal(info){
+  return new Promise(resolve=>{
+    const body=document.getElementById('heavy-modal-body');
+    body.innerHTML=
+      `この画像のAI超解像では処理に時間がかかる可能性があります。<br><br>`+
+      `推定タイル数：<span class="modal-stat">約${info.tiles}タイル</span><br>`+
+      `元画像サイズ：<span class="modal-stat">${info.longSide}px（長辺）</span><br>`+
+      `選択倍率：<span class="modal-stat">×${info.scale}</span><br><br>`+
+      `WASM環境ではブラウザが応答しなくなる場合があります。<br>`+
+      `高品質補間、または倍率を下げることをおすすめします。`;
+
+    const modal=document.getElementById('heavy-modal');
+    modal.classList.add('open');
+
+    const cleanup=choice=>{
+      modal.classList.remove('open');
+      document.getElementById('modal-btn-continue').onclick=null;
+      document.getElementById('modal-btn-bicubic').onclick=null;
+      document.getElementById('modal-btn-cancel').onclick=null;
+      resolve(choice);
+    };
+    document.getElementById('modal-btn-continue').onclick=()=>cleanup('continue');
+    document.getElementById('modal-btn-bicubic').onclick=()=>cleanup('bicubic');
+    document.getElementById('modal-btn-cancel').onclick=()=>cleanup('cancel');
+    // オーバーレイ外クリックでキャンセル
+    modal.onclick=e=>{if(e.target===modal)cleanup('cancel');};
+  });
+}
+
 // ===== 処理実行 =====
 document.getElementById('btn-run').onclick=()=>runAll();
 
@@ -918,7 +1005,27 @@ async function runAll(){
   hideError();
 
   // tryAI: AIモードを選択 かつ AIモデルが使用可能な場合のみ
-  const tryAI=(engineState==='ai-webgpu'||engineState==='ai-wasm')&&currentMode==='ai';
+  let tryAI=(engineState==='ai-webgpu'||engineState==='ai-wasm')&&currentMode==='ai';
+
+  // WASM + AI モード時、重い処理の警告チェック（最も大きいファイルで代表判定）
+  if(tryAI&&engineState==='ai-wasm'){
+    const representative=queue.reduce((a,b)=>
+      Math.max(a.canvas.width,a.canvas.height)>=Math.max(b.canvas.width,b.canvas.height)?a:b
+    );
+    const warnInfo=shouldWarnHeavyAI(representative);
+    if(warnInfo){
+      btn.disabled=false;btn.textContent='▶ 高画質化する'; // ボタンを一旦復元してモーダル表示
+      const choice=await showHeavyModal(warnInfo);
+      if(choice==='cancel') return;
+      if(choice==='bicubic'){
+        // 高品質補間に切り替え（UIも同期）
+        setMode('bicubic');
+        tryAI=false;
+      }
+      btn.disabled=true;btn.textContent='処理中...';
+    }
+  }
+
   let lastActualMode='bicubic';
 
   try{
