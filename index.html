@@ -350,7 +350,9 @@ const MAX_MEGAPIXELS=80;
 // engineState: 'loading' | 'ai-webgpu' | 'ai-wasm' | 'fallback'
 let engineState='loading';
 let onnxSession=null;
-let detectedModelScale=4; // テスト推論で確認した実際のモデル出力倍率
+let detectedModelScale=4;  // テスト推論で確認した実際のモデル出力倍率
+let modelInputW=128;       // モデルの固定入力幅（verifyModelSessionで更新）
+let modelInputH=128;       // モデルの固定入力高（verifyModelSessionで更新）
 
 // ===== UI状態 =====
 let currentMode='upscale', currentScale=2, currentFmt='png';
@@ -435,6 +437,8 @@ async function initEngine(){
   if(!session){
     try{
       setEngineUI('loading','AIモデルを読み込み中（WASM）...','読み込み中');
+      // FIX⑧: crossOriginIsolated非対応環境向けにシングルスレッドに固定
+      ort.env.wasm.numThreads=1;
       session=await ort.InferenceSession.create('models/realesrgan_x4.onnx',{
         executionProviders:['wasm'],
         graphOptimizationLevel:'all',
@@ -456,35 +460,45 @@ async function initEngine(){
 
   onnxSession=session;
   detectedModelScale=verify.modelScale;
+  modelInputW=verify.inputW;
+  modelInputH=verify.inputH;
   engineState=backend==='webgpu'?'ai-webgpu':'ai-wasm';
   const modeLabel=backend==='webgpu'?'AI超解像 / Real-ESRGAN / WebGPU':'AI超解像 / Real-ESRGAN / WASM';
-  setEngineUI('ready-ai',`AIモデル準備完了（×${detectedModelScale}モデル確認済み）`,modeLabel);
+  setEngineUI('ready-ai',`AIモデル準備完了（×${detectedModelScale}・入力${modelInputW}×${modelInputH}固定）`,modeLabel);
   updateRunBtn();
 }
 
-// FIX⑦: テスト推論によるモデル形式検証
+// テスト推論によるモデル形式検証（固定入力サイズを自動検出）
 async function verifyModelSession(session){
-  try{
-    const H=32,W=32; // Real-ESRGAN系は小さすぎる入力で失敗するため32×32を使用
-    const testData=new Float32Array(3*H*W).fill(0.5);
-    const inputName=session.inputNames[0];
-    if(!inputName) return{ok:false,reason:'入力名が取得できません'};
-    const feeds={[inputName]:new ort.Tensor('float32',testData,[1,3,H,W])};
-    const results=await session.run(feeds);
-    const outputName=session.outputNames[0];
-    if(!outputName) return{ok:false,reason:'出力名が取得できません'};
-    const output=results[outputName];
-    if(!output||!output.dims||output.dims.length!==4)
-      return{ok:false,reason:`出力が4次元テンソルではありません（dims: ${output?.dims}）`};
-    const[,outC,outH,outW]=output.dims;
-    if(outC!==3) return{ok:false,reason:`出力チャンネル数が3ではありません（実際: ${outC}）`};
-    const scaleH=outH/H, scaleW=outW/W;
-    if(Math.abs(scaleH-scaleW)>0.01||!Number.isInteger(Math.round(scaleH))||scaleH<2||scaleH>8)
-      return{ok:false,reason:`出力倍率が想定外です（H:${scaleH}× W:${scaleW}×）`};
-    return{ok:true,modelScale:Math.round(scaleH)};
-  }catch(e){
-    return{ok:false,reason:'テスト推論エラー: '+e.message};
+  const inputName=session.inputNames[0];
+  const outputName=session.outputNames[0];
+  if(!inputName) return{ok:false,reason:'入力名が取得できません'};
+  if(!outputName) return{ok:false,reason:'出力名が取得できません'};
+
+  // 固定入力サイズ候補を大きい順に試行（128→64→32）
+  // モデルが固定入力の場合、サイズが合わないとエラーになる
+  const candidates=[128,64,32];
+  for(const sz of candidates){
+    try{
+      const testData=new Float32Array(3*sz*sz).fill(0.5);
+      const feeds={[inputName]:new ort.Tensor('float32',testData,[1,3,sz,sz])};
+      const results=await session.run(feeds);
+      const output=results[outputName];
+      if(!output||!output.dims||output.dims.length!==4)
+        return{ok:false,reason:`出力が4次元テンソルではありません（dims: ${output?.dims}）`};
+      const[,outC,outH,outW]=output.dims;
+      if(outC!==3) return{ok:false,reason:`出力チャンネル数が3ではありません（実際: ${outC}）`};
+      const scaleH=outH/sz, scaleW=outW/sz;
+      if(Math.abs(scaleH-scaleW)>0.01||!Number.isInteger(Math.round(scaleH))||scaleH<2||scaleH>8)
+        return{ok:false,reason:`出力倍率が想定外です（H:${scaleH}× W:${scaleW}×）`};
+      // 成功: 入力サイズとスケールを記録
+      return{ok:true,modelScale:Math.round(scaleH),inputW:outW/Math.round(scaleH),inputH:outH/Math.round(scaleH)};
+    }catch(e){
+      // このサイズではダメ → 次を試す
+      console.log(`[SAKASU] テスト推論 ${sz}×${sz} 失敗（${e.message}）、次を試します`);
+    }
   }
+  return{ok:false,reason:'対応する入力サイズが見つかりません（128/64/32すべて失敗）'};
 }
 
 function setFallback(reason){
@@ -807,75 +821,64 @@ async function processItem(item,qIdx,total,tryAI){
 
 // ===== AI超解像処理（ONNX Real-ESRGAN タイル処理）=====
 async function processWithAI(srcCanvas,outCanvas,outCtx,sw,sh,userScale,qIdx,total){
-  // FIX①: モデルは常に detectedModelScale（通常4）倍出力
-  const MS=detectedModelScale;
-  const TILE=engineState==='ai-webgpu'?128:64;
-  const OVERLAP=engineState==='ai-webgpu'?16:8;
+  const MS=detectedModelScale;           // モデル出力倍率（通常4）
+  const TW=modelInputW;                  // モデル固定入力幅（例: 128）
+  const TH=modelInputH;                  // モデル固定入力高（例: 128）
 
   const srcCtx=srcCanvas.getContext('2d');
-  const tilesX=Math.ceil(sw/TILE);
-  const tilesY=Math.ceil(sh/TILE);
+  const tilesX=Math.ceil(sw/TW);
+  const tilesY=Math.ceil(sh/TH);
   const totalTiles=tilesX*tilesY;
   let aiTiles=0,fbTiles=0;
 
-  // FIX①: x4中間キャンバス（常にMS倍）
+  // x4中間キャンバス（常にMS倍サイズ）
   const x4W=sw*MS,x4H=sh*MS;
   const x4C=document.createElement('canvas');x4C.width=x4W;x4C.height=x4H;
   const x4Ctx=x4C.getContext('2d');
 
-  // FIX⑤: 透明PNG対応 — アルファチャンネルを先に抽出・拡大
+  // 透明PNG対応 — アルファチャンネルを先に抽出・拡大
   const srcImgData=srcCtx.getImageData(0,0,sw,sh);
   const hasAlpha=checkHasTransparency(srcImgData);
   let alphaX4Canvas=null;
-  if(hasAlpha){
-    alphaX4Canvas=upscaleAlphaChannel(srcImgData,sw,sh,MS);
-  }
+  if(hasAlpha) alphaX4Canvas=upscaleAlphaChannel(srcImgData,sw,sh,MS);
 
   let doneTiles=0;
   for(let ty=0;ty<tilesY;ty++){
     for(let tx=0;tx<tilesX;tx++){
-      // ソースタイル座標（overlap込み）
-      const srcX=Math.max(0,tx*TILE-OVERLAP);
-      const srcY=Math.max(0,ty*TILE-OVERLAP);
-      const srcX2=Math.min(sw,(tx+1)*TILE+OVERLAP);
-      const srcY2=Math.min(sh,(ty+1)*TILE+OVERLAP);
-      const tileW=srcX2-srcX;
-      const tileH=srcY2-srcY;
+      // 画像上の有効ソース範囲
+      const srcX=tx*TW, srcY=ty*TH;
+      const validW=Math.min(TW,sw-srcX);  // 実際に有効なピクセル幅
+      const validH=Math.min(TH,sh-srcY);  // 実際に有効なピクセル高
 
-      const tileData=srcCtx.getImageData(srcX,srcY,tileW,tileH);
+      // モデル固定入力サイズ（TW×TH）に合わせてパディング付きタイルを作る
+      // 端タイルで画像が足りない場合: mirror padding で自然に補完
+      const paddedTile=makePaddedTile(srcCtx,srcX,srcY,validW,validH,TW,TH,sw,sh);
 
-      // ONNX推論（RGBのみ、アルファは別処理）
+      // ONNX推論（RGBのみ）
       let upscaledData;
       try{
-        upscaledData=await runOnnxTile(tileData,tileW,tileH);
+        upscaledData=await runOnnxTile(paddedTile,TW,TH);
         aiTiles++;
       }catch(e){
-        // FIX②: 失敗タイルをカウントし、bicubicで補間（MS倍で）
-        upscaledData=bicubicUpscale(tileData,tileW,tileH,MS);
+        // 失敗タイルはbicubicで補間（MS倍）
+        upscaledData=bicubicUpscale(paddedTile,TW,TH,MS);
         fbTiles++;
       }
 
-      // FIX①: cropはMS（モデル出力倍率）で計算
-      // 有効領域 = ソース空間で [tx*TILE, min(sw,(tx+1)*TILE)]
-      const padLeft=tx*TILE-srcX;            // 左overlap実量
-      const padTop=ty*TILE-srcY;             // 上overlap実量
-      const validSrcW=Math.min(TILE,sw-tx*TILE);  // 有効ソース幅
-      const validSrcH=Math.min(TILE,sh-ty*TILE);  // 有効ソース高
+      // 出力から有効領域だけ切り出して貼り付け（padding分を除く）
+      const outValidW=validW*MS;
+      const outValidH=validH*MS;
+      const dstX=srcX*MS;
+      const dstY=srcY*MS;
 
-      const cropX=padLeft*MS;
-      const cropY=padTop*MS;
-      const cropW=validSrcW*MS;
-      const cropH=validSrcH*MS;
-      const dstX=tx*TILE*MS;
-      const dstY=ty*TILE*MS;
-
-      if(cropW>0&&cropH>0){
+      if(outValidW>0&&outValidH>0){
         const tmpC=document.createElement('canvas');
         tmpC.width=upscaledData.width;tmpC.height=upscaledData.height;
         tmpC.getContext('2d').putImageData(upscaledData,0,0);
         const cropC=document.createElement('canvas');
-        cropC.width=cropW;cropC.height=cropH;
-        cropC.getContext('2d').drawImage(tmpC,cropX,cropY,cropW,cropH,0,0,cropW,cropH);
+        cropC.width=outValidW;cropC.height=outValidH;
+        // 推論出力の左上から有効領域分だけ切り出す
+        cropC.getContext('2d').drawImage(tmpC,0,0,outValidW,outValidH,0,0,outValidW,outValidH);
         x4Ctx.drawImage(cropC,dstX,dstY);
       }
 
@@ -886,17 +889,40 @@ async function processWithAI(srcCanvas,outCanvas,outCtx,sw,sh,userScale,qIdx,tot
     }
   }
 
-  // FIX⑤: アルファを合成
-  if(hasAlpha&&alphaX4Canvas){
-    mergeAlphaChannel(x4C,alphaX4Canvas,x4W,x4H);
-  }
+  // アルファを合成
+  if(hasAlpha&&alphaX4Canvas) mergeAlphaChannel(x4C,alphaX4Canvas,x4W,x4H);
 
-  // FIX①: userScaleがMS（4）でない場合は最終リサイズ（×2/×3）
+  // userScaleがMS（4）でない場合は最終リサイズ（×2/×3）
   const finalW=sw*userScale,finalH=sh*userScale;
   outCanvas.width=finalW;outCanvas.height=finalH;
   outCtx.drawImage(x4C,0,0,finalW,finalH);
 
   return{aiTiles,fbTiles};
+}
+
+// 固定サイズタイル作成（mirror paddingで端を補完）
+function makePaddedTile(srcCtx,srcX,srcY,validW,validH,tileW,tileH,imgW,imgH){
+  const tileCanvas=document.createElement('canvas');
+  tileCanvas.width=tileW;tileCanvas.height=tileH;
+  const tileCtx=tileCanvas.getContext('2d');
+
+  // まず画像から取れる範囲を描く
+  tileCtx.drawImage(srcCtx.canvas,srcX,srcY,validW,validH,0,0,validW,validH);
+
+  // 右側が足りない場合: 有効領域を右端まで引き伸ばす（edge padding）
+  if(validW<tileW){
+    const edgeC=document.createElement('canvas');edgeC.width=1;edgeC.height=validH;
+    edgeC.getContext('2d').drawImage(srcCtx.canvas,Math.min(srcX+validW-1,imgW-1),srcY,1,validH,0,0,1,validH);
+    for(let px=validW;px<tileW;px++) tileCtx.drawImage(edgeC,px,0,1,validH);
+  }
+  // 下側が足りない場合: 有効領域を下端まで引き伸ばす（edge padding）
+  if(validH<tileH){
+    const edgeR=document.createElement('canvas');edgeR.width=tileW;edgeR.height=1;
+    edgeR.getContext('2d').drawImage(tileCanvas,0,Math.min(validH-1,tileH-1),tileW,1,0,0,tileW,1);
+    for(let py=validH;py<tileH;py++) tileCtx.drawImage(edgeR,0,py,tileW,1);
+  }
+
+  return tileCtx.getImageData(0,0,tileW,tileH);
 }
 
 // FIX⑤: 透明度チェック
@@ -932,19 +958,21 @@ function mergeAlphaChannel(rgbCanvas,alphaCanvas,w,h){
   ctx.putImageData(rgbData,0,0);
 }
 
-// ONNX 1タイル推論（RGBのみ、出力はRGBA・A=255）
+// ONNX 1タイル推論（固定サイズ入力、RGBのみ、出力はRGBA・A=255）
 async function runOnnxTile(imageData,w,h){
+  // w/h は必ず modelInputW/modelInputH と一致している前提（makePaddedTileで保証）
   const pixels=imageData.data;
   const floatData=new Float32Array(3*h*w);
   for(let y=0;y<h;y++){
     for(let x=0;x<w;x++){
       const si=(y*w+x)*4,ti=y*w+x;
-      floatData[ti]        =pixels[si]  /255.0; // R
-      floatData[h*w+ti]    =pixels[si+1]/255.0; // G
-      floatData[2*h*w+ti]  =pixels[si+2]/255.0; // B
+      floatData[ti]      =pixels[si]  /255.0; // R
+      floatData[h*w+ti]  =pixels[si+1]/255.0; // G
+      floatData[2*h*w+ti]=pixels[si+2]/255.0; // B
     }
   }
   const inputName=onnxSession.inputNames[0];
+  // 固定入力サイズ [1,3,H,W] で推論
   const results=await onnxSession.run({[inputName]:new ort.Tensor('float32',floatData,[1,3,h,w])});
   const output=results[onnxSession.outputNames[0]];
   const outData=output.data;
@@ -957,7 +985,7 @@ async function runOnnxTile(imageData,w,h){
       imgPixels[si]  =Math.max(0,Math.min(255,Math.round(outData[ti]*255)));
       imgPixels[si+1]=Math.max(0,Math.min(255,Math.round(outData[outH*outW+ti]*255)));
       imgPixels[si+2]=Math.max(0,Math.min(255,Math.round(outData[2*outH*outW+ti]*255)));
-      imgPixels[si+3]=255; // アルファは別途 mergeAlphaChannel で上書き
+      imgPixels[si+3]=255; // アルファは mergeAlphaChannel で上書き
     }
   }
   return imgData;
