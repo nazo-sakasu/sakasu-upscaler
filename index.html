@@ -241,6 +241,24 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 .modal-btn-cancel{background:none;border:none;padding:8px;font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);cursor:pointer;transition:color 0.15s}
 .modal-btn-cancel:hover{color:var(--text)}
 
+/* 複数ファイルバッジ */
+.in-count-badge{font-family:'DM Mono',monospace;font-size:10px;background:rgba(200,255,0,0.12);color:var(--accent);border:1px solid rgba(200,255,0,0.35);border-radius:6px;padding:2px 9px;margin-left:6px;display:none;letter-spacing:0.5px}
+.in-count-badge.show{display:inline-block}
+
+/* プレビュー番号 */
+.preview-meta{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);margin-top:6px;display:none}
+.preview-meta.show{display:block}
+
+/* 選択ファイルリスト */
+.file-list{margin-top:8px;display:none}
+.file-list.show{display:block}
+.file-list-title{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.file-list-items{display:flex;flex-direction:column;gap:3px}
+.file-list-item{display:flex;align-items:center;gap:7px;font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)}
+.file-list-num{color:var(--border);flex-shrink:0;min-width:16px;text-align:right}
+.file-list-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.file-list-more{font-family:'DM Mono',monospace;font-size:10px;color:var(--border);padding-top:2px;padding-left:23px}
+
 .footer{font-family:'DM Mono',monospace;font-size:10px;color:#222;text-align:center;margin-top:48px;letter-spacing:1px;line-height:1.8}
 </style>
 </head>
@@ -383,7 +401,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 <!-- 入出力 -->
 <div class="grid">
   <div class="panel">
-    <div class="panel-label">入力 <span id="in-count" style="font-family:'DM Mono',monospace;font-size:10px;color:var(--accent);display:none"></span></div>
+    <div class="panel-label">入力 <span class="in-count-badge" id="in-count"></span></div>
     <div id="upload-area-wrap">
       <div class="upload-area" id="drop-zone">
         <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp,image/tiff,image/bmp,application/pdf" multiple>
@@ -410,6 +428,12 @@ input[type=range]{flex:1;accent-color:var(--accent)}
       <div class="preview-wrap">
         <img id="in-img" src="" alt="入力プレビュー">
         <span class="img-badge" id="in-badge"></span>
+      </div>
+      <div class="preview-meta" id="preview-meta"></div>
+      <div class="file-list" id="file-list">
+        <div class="file-list-title">選択中のファイル</div>
+        <div class="file-list-items" id="file-list-items"></div>
+        <div class="file-list-more" id="file-list-more"></div>
       </div>
       <button class="reset-btn" onclick="resetAll()">✕ リセット・別のファイルを選ぶ</button>
     </div>
@@ -696,7 +720,8 @@ function updateActionChip(){
   const modeLabel=currentMode==='ai'?'AI超解像':currentMode==='bicubic'?'高品質補間':'輪郭くっきり補正';
   const scaleLabel=currentMode==='sharpen'?'拡大なし':'×'+currentScale;
   const fmtLabel=currentFmt.toUpperCase();
-  chip.innerHTML=`<strong>${modeLabel}</strong> / ${scaleLabel} / ${fmtLabel}`;
+  const countLabel=queue.length>1?` / ${queue.length}ファイル`:'';
+  chip.innerHTML=`<strong>${modeLabel}</strong> / ${scaleLabel} / ${fmtLabel}${countLabel}`;
 }
 
 // ===== モード/フォーマット =====
@@ -899,16 +924,67 @@ async function loadPdf(file){
 // ===== キューUI =====
 function renderQueueUI(){
   const first=queue[0];if(!first)return;
+  const isMulti=queue.length>1;
+
   document.getElementById('upload-area-wrap').style.display='none';
   document.getElementById('preview-area').style.display='block';
+
+  // プレビュー画像（常に1枚目）
   document.getElementById('in-img').src=first.dataUrl;
   document.getElementById('in-badge').textContent=first.name+' · '+first.canvas.width+'×'+first.canvas.height;
   originalFileName=first.name.replace(/\.[^.]+$/,'');
-  if(queue.length>1){
-    document.getElementById('batch-queue').classList.add('show');
-    document.getElementById('in-count').textContent=queue.length+'ファイル';
-    document.getElementById('in-count').style.display='inline';
+
+  // ファイル数バッジ
+  const badge=document.getElementById('in-count');
+  if(isMulti){
+    badge.textContent=queue.length+'ファイル選択中';
+    badge.classList.add('show');
+  }else{
+    badge.classList.remove('show');
   }
+
+  // プレビュー番号表示（複数時のみ）
+  const meta=document.getElementById('preview-meta');
+  if(isMulti){
+    meta.textContent=`1枚目をプレビュー中 / 全${queue.length}ファイル`;
+    meta.classList.add('show');
+  }else{
+    meta.classList.remove('show');
+  }
+
+  // ファイルリスト（複数時のみ）
+  const fileList=document.getElementById('file-list');
+  const listItems=document.getElementById('file-list-items');
+  const listMore=document.getElementById('file-list-more');
+  if(isMulti){
+    const MAX_SHOW=5;
+    listItems.innerHTML='';
+    queue.slice(0,MAX_SHOW).forEach((f,i)=>{
+      const div=document.createElement('div');
+      div.className='file-list-item';
+      div.innerHTML=`<span class="file-list-num">${i+1}.</span><span class="file-list-name">${f.name}</span>`;
+      listItems.appendChild(div);
+    });
+    if(queue.length>MAX_SHOW){
+      listMore.textContent=`ほか${queue.length-MAX_SHOW}件`;
+    }else{
+      listMore.textContent='';
+    }
+    fileList.classList.add('show');
+  }else{
+    fileList.classList.remove('show');
+  }
+
+  // バッチキューは複数時に処理前から表示
+  if(isMulti){
+    document.getElementById('batch-queue').classList.add('show');
+  }
+
+  // ボタン文言を更新
+  updateRunBtn();
+  // アクションチップも更新
+  updateActionChip();
+
   rebuildQueueList();
 }
 function rebuildQueueList(){
@@ -1067,7 +1143,8 @@ async function runAll(){
   }
 
   const btn=document.getElementById('btn-run');
-  btn.disabled=true;btn.textContent='処理中...';
+  const processingLabel=queue.length>1?`${queue.length}ファイル処理中...`:'処理中...';
+  btn.disabled=true;btn.textContent=processingLabel;
   hideError();
 
   // tryAI: AIモードを選択 かつ AIモデルが使用可能な場合のみ
@@ -1570,17 +1647,32 @@ function resetAll(){
   document.getElementById('batch-queue').classList.remove('show');
   document.getElementById('batch-label').classList.remove('show');
   document.getElementById('print-card').classList.remove('show');
-  document.getElementById('in-count').style.display='none';
-  document.getElementById('file-input').value='';
-  document.getElementById('file-btn').value='';
+  // 複数ファイルUI リセット
+  const badge=document.getElementById('in-count');
+  badge.classList.remove('show');badge.textContent='';
+  document.getElementById('preview-meta').classList.remove('show');
+  document.getElementById('file-list').classList.remove('show');
+  document.getElementById('file-list-items').innerHTML='';
+  document.getElementById('file-list-more').textContent='';
   // PDFアコーディオンを閉じてバッジを非表示
   document.getElementById('pdf-toggle').classList.remove('open');
   document.getElementById('pdf-accordion-body').classList.remove('open');
   document.getElementById('pdf-badge').style.display='none';
-  hideError();hideWarn();updateRunBtn();
+  document.getElementById('file-input').value='';
+  document.getElementById('file-btn').value='';
+  hideError();hideWarn();updateRunBtn();updateActionChip();
 }
 
-function updateRunBtn(){document.getElementById('btn-run').disabled=!(engineState!=='loading'&&queue.length>0);}
+function updateRunBtn(){
+  const btn=document.getElementById('btn-run');
+  const ready=engineState!=='loading'&&queue.length>0;
+  btn.disabled=!ready;
+  if(ready&&queue.length>1){
+    btn.textContent=`▶ ${queue.length}ファイルを高画質化する`;
+  }else{
+    btn.textContent='▶ 高画質化する';
+  }
+}
 function showProgress(pct,msg){document.getElementById('progress-wrap').classList.add('show');document.getElementById('pb').style.width=pct+'%';document.getElementById('pb-text').textContent=msg;}
 function hideProgress(){document.getElementById('progress-wrap').classList.remove('show');}
 function showError(msg){const e=document.getElementById('error-msg');e.textContent=msg;e.classList.add('show');}
