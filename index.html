@@ -432,7 +432,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
           <span class="fmt-tag img">TIFF</span>
           <span class="fmt-tag img">BMP</span>
           <span class="fmt-tag doc">PDF</span>
-          <span class="fmt-tag" style="color:#444">複数OK</span>
+          <span class="fmt-tag" style="color:#888">複数OK・最大10ファイル</span>
         </div>
         <div class="fmt-note">TIFFは一部形式のみ対応です。<br>PDFは画像化して処理します。</div>
       </div>
@@ -545,6 +545,7 @@ const PRINT_SIZES=[
 // 出力安全制限
 const MAX_LONG_SIDE=12000;
 const MAX_MEGAPIXELS=80;
+const MAX_FILES=10; // アップロード上限
 
 // ===== エンジン状態 =====
 // engineState: 'loading' | 'ai-webgpu' | 'ai-wasm' | 'fallback'
@@ -807,10 +808,20 @@ document.getElementById('file-btn').onchange=e=>handleFiles([...e.target.files])
 
 async function handleFiles(files){
   hideError();hideWarn();
-  for(const f of files){
+  const remaining=MAX_FILES-queue.length;
+  if(remaining<=0){
+    showWarn(`すでに${MAX_FILES}ファイル選択中です。これ以上追加できません。1ファイル削除してから追加してください。`);
+    return;
+  }
+  const accepted=files.slice(0,remaining);
+  const skipped=files.length-accepted.length;
+  for(const f of accepted){
     if(/\.pdf$/i.test(f.name)||f.type==='application/pdf') await loadPdf(f);
     else if(/\.tiff?$/i.test(f.name)) await loadTiff(f);
     else await loadImage(f);
+  }
+  if(skipped>0){
+    showWarn(`最大${MAX_FILES}ファイルまで処理できます。${skipped}件は読み込みませんでした。`);
   }
   if(queue.length===0) return;
   renderQueueUI();
@@ -927,7 +938,12 @@ async function loadPdf(file){
   // PDFアップロード時はアコーディオンを自動で開く
   openPdfAccordion();
   const pagesToLoad=document.getElementById('opt-pdf-all').checked?pdf.numPages:1;
+  let pagesAdded=0;
   for(let p=1;p<=pagesToLoad;p++){
+    if(queue.length>=MAX_FILES){
+      showWarn(`最大${MAX_FILES}ファイルの上限に達しました。PDFの${p}ページ目以降は読み込みませんでした。`);
+      break;
+    }
     try{
       const page=await pdf.getPage(p);
       const vp=page.getViewport({scale:2.0});
@@ -937,6 +953,7 @@ async function loadPdf(file){
       const dataUrl=c.toDataURL('image/png');
       const pageName=file.name.replace(/\.pdf$/i,`_p${String(p).padStart(2,'0')}.png`);
       queue.push({name:pageName,canvas:c,dataUrl,exifData:null,status:'wait',resultUrl:null,resultCanvas:null,isPdfPage:true});
+      pagesAdded++;
     }catch(e){showError(`PDFページ${p}の読み込みエラー: `+e.message);}
   }
 }
@@ -1079,6 +1096,8 @@ function removeQueueItem(index){
   // UI再描画（previewIndexを維持）
   renderQueueUI(false);
 }
+
+function rebuildQueueList(){
   const list=document.getElementById('queue-list');list.innerHTML='';
   queue.forEach((f,i)=>{
     const div=document.createElement('div');div.className='qi';div.id='qi'+i;
@@ -1245,15 +1264,20 @@ async function runAll(){
   if(tryAI&&engineState==='ai-wasm'){
     const warnInfo=shouldWarnHeavyAI(queue);
     if(warnInfo){
+      // モーダル表示前にisProcessingを戻し、削除ボタンを再有効化
+      isProcessing=false;
+      document.querySelectorAll('.thumb-remove').forEach(b=>{b.disabled=false;});
       btn.disabled=false;
-      updateRunBtn(); // ファイル数対応のボタン文言に戻す
+      updateRunBtn();
       const choice=await showHeavyModal(warnInfo);
-      if(choice==='cancel') return;
+      if(choice==='cancel') return; // finallyでボタン復元済み
       if(choice==='bicubic'){
         setMode('bicubic');
         tryAI=false;
       }
-      // 処理再開: ファイル数対応のラベルで再度disableする
+      // 処理再開
+      isProcessing=true;
+      document.querySelectorAll('.thumb-remove').forEach(b=>{b.disabled=true;});
       btn.disabled=true;
       btn.textContent=queue.length>1?`${queue.length}ファイル処理中...`:'処理中...';
     }
