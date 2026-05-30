@@ -453,7 +453,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
     <div class="panel-label">出力 <span class="out-tag" id="out-tag"></span></div>
     <div id="out-placeholder" style="border:2px dashed var(--border);border-radius:12px;min-height:190px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px">
       <div style="font-size:28px;opacity:0.15">✨</div>
-      <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">処理後に表示されます</div>
+      <div id="out-placeholder-msg" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">処理後に表示されます</div>
     </div>
     <div id="out-preview" style="display:none">
       <div class="compare-outer" id="compare-outer">
@@ -467,6 +467,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
         <div class="c-label before">BEFORE</div>
         <div class="c-label after">AFTER</div>
       </div>
+      <div class="preview-meta inline" id="out-meta" style="margin-top:6px;display:none"></div>
     </div>
   </div>
 </div>
@@ -1023,6 +1024,9 @@ function updateInputPreview(index){
   document.querySelectorAll('.thumb-item').forEach((el,i)=>{
     el.classList.toggle('active',i===index);
   });
+
+  // 出力側を入力インデックスに連動
+  updateOutputForItem(f, isMulti?index:-1);
 }
 function rebuildQueueList(){
   const list=document.getElementById('queue-list');list.innerHTML='';
@@ -1218,12 +1222,16 @@ async function runAll(){
       lastActualMode=result.actualMode;
       document.getElementById('batch-label').textContent=`${i+1}/${queue.length} 完了`;
       document.getElementById('batch-label').classList.add('show');
+      // 処理完了したアイテムが現在プレビュー中のインデックスと一致する場合のみ出力側を更新
+      if(i===previewIndex){
+        updateOutputForItem(queue[i], queue.length>1?i:-1);
+      }
     }
 
     hideProgress();
-    const last=queue[queue.length-1];
-    showOutput(last.resultUrl,last.dataUrl,last.resultCanvas.width,last.resultCanvas.height,last.actualMode);
-    showPrintCard(last.resultCanvas.width,last.resultCanvas.height);
+    // 全完了後: previewIndex に対応するアイテムを表示（連動済みなので再呼び出しで確実に同期）
+    updateOutputForItem(queue[previewIndex], queue.length>1?previewIndex:-1);
+    showPrintCard(queue[previewIndex].resultCanvas.width, queue[previewIndex].resultCanvas.height);
 
     document.getElementById('btn-dl').classList.add('show');
     if(queue.length>1)document.getElementById('btn-zip').classList.add('show');
@@ -1534,52 +1542,87 @@ function applyLocalContrast(imageData,w,h){
   return new ImageData(out,w,h);
 }
 
-// FIX②: actualMode で正直に処理方式を表示
-// actualMode: 'ai-full' | 'ai-partial' | 'bicubic' | 'sharpen'
-function showOutput(resultUrl,inputUrl,w,h,actualMode){
+// ===== 出力表示（アイテム単位）=====
+// item: queue のエントリ（resultUrl, resultCanvas, actualMode, dataUrl を持つ）
+// isMulti: 複数ファイル処理かどうか
+// idx: queue 内のインデックス（out-meta 表示用）
+function updateOutputForItem(item, idx){
+  const isMulti=queue.length>1;
+
+  if(!item||!item.resultUrl){
+    // 未処理・処理前
+    document.getElementById('out-placeholder').style.display='flex';
+    document.getElementById('out-preview').style.display='none';
+    document.getElementById('out-tag').style.display='none';
+    const msg=document.getElementById('out-placeholder-msg');
+    if(msg) msg.textContent=item&&item.status==='proc'?'処理中...':'このファイルはまだ処理されていません';
+    document.getElementById('out-meta').style.display='none';
+    return;
+  }
+
+  // 処理済み
   document.getElementById('out-placeholder').style.display='none';
   document.getElementById('out-preview').style.display='block';
 
+  // out-tag
   const tag=document.getElementById('out-tag');
+  const w=item.resultCanvas.width, h=item.resultCanvas.height;
+  const actualMode=item.actualMode||'bicubic';
   let modeLabel,tagClass;
   if(actualMode==='ai-full'){
-    modeLabel=`AI超解像 ×${currentScale}`;
-    tagClass='ai';
+    modeLabel=`AI超解像 ×${currentScale}`;tagClass='ai';
   }else if(actualMode==='ai-partial'){
-    modeLabel=`AI超解像（一部補間フォールバックあり）×${currentScale}`;
-    tagClass='fb';
+    modeLabel=`AI超解像（一部補間）×${currentScale}`;tagClass='fb';
   }else if(actualMode==='sharpen'){
-    modeLabel='輪郭くっきり補正';
-    tagClass='fb';
+    modeLabel='輪郭くっきり補正';tagClass='fb';
   }else{
-    // 'bicubic' — AI選択でフォールバックした場合も「高品質補間」と表示
-    modeLabel=currentMode==='sharpen'?'輪郭補正':`高品質補間 ×${currentScale}`;
-    tagClass='fb';
+    modeLabel=currentMode==='sharpen'?'輪郭補正':`高品質補間 ×${currentScale}`;tagClass='fb';
   }
   tag.textContent=w+'×'+h+' · '+modeLabel;
   tag.className='out-tag '+tagClass;
   tag.style.display='inline-block';
 
-  const outImg=document.getElementById('out-img');
+  // out-meta（複数ファイル時のみ）
+  const outMeta=document.getElementById('out-meta');
+  if(isMulti&&idx>=0){
+    outMeta.textContent=(idx+1)+'枚目の出力結果 / 全'+queue.length+'ファイル';
+    outMeta.style.display='block';
+  }else{
+    outMeta.style.display='none';
+  }
+
+  // 画像・比較スライダー
+  document.getElementById('out-img').src=item.resultUrl;
   const beforeImg=document.getElementById('cmp-before');
-  outImg.src=resultUrl;
   const tmpC=document.createElement('canvas');
   tmpC.width=w;tmpC.height=h;
   const tmpImg=new Image();
   tmpImg.onload=()=>{
     tmpC.getContext('2d').drawImage(tmpImg,0,0,w,h);
     beforeImg.src=tmpC.toDataURL('image/jpeg',0.85);
-    initCompareSlider();
+    initCompareSlider(); // スライダーを50%にリセット
   };
-  tmpImg.src=inputUrl;
+  tmpImg.src=item.dataUrl;
+
+  // 印刷耐性は全処理完了後のみ（単体の場合は即更新）
+  if(queue.length===1) showPrintCard(w,h);
+}
+
+// 後方互換ラッパー（単体処理・完了後の呼び出し用）
+function showOutput(resultUrl,inputUrl,w,h,actualMode){
+  // previewIndex に対応するアイテムを直接 updateOutputForItem に委譲
+  const item=queue[previewIndex];
+  if(item) updateOutputForItem(item, queue.length>1?previewIndex:-1);
 }
 
 // ===== ダウンロード =====
 document.getElementById('btn-dl').onclick=()=>{
-  const last=queue[queue.length-1];if(!last||!last.resultUrl)return;
+  // 複数ファイル時は現在プレビュー中のファイルをDL、単体はそのまま
+  const target=queue.length>1?queue[previewIndex]:queue[queue.length-1];
+  if(!target||!target.resultUrl)return;
   const sfx=currentMode==='sharpen'?'_sharpen':'_x'+currentScale;
-  const a=document.createElement('a');a.href=last.resultUrl;
-  a.download=originalFileName+sfx+'.'+currentFmt;a.click();
+  const name=target.name.replace(/\.[^.]+$/,'')+sfx+'.'+currentFmt;
+  const a=document.createElement('a');a.href=target.resultUrl;a.download=name;a.click();
 };
 
 document.getElementById('btn-zip').onclick=async()=>{
