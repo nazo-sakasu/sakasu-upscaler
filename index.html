@@ -264,6 +264,13 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 .thumb-item.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
 .thumb-item .thumb-num{position:absolute;bottom:2px;right:3px;font-family:'DM Mono',monospace;font-size:8px;color:rgba(255,255,255,0.75);text-shadow:0 1px 2px rgba(0,0,0,0.8);line-height:1}
 .thumb-more{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);align-self:center;flex-shrink:0;padding:4px 0}
+/* 削除ボタン */
+.thumb-remove{position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:rgba(0,0,0,0.75);border:1px solid rgba(255,255,255,0.25);color:#fff;font-size:10px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.15s;z-index:5;padding:0}
+.thumb-item:hover .thumb-remove{opacity:1}
+.thumb-remove:hover{background:var(--danger)!important;border-color:var(--danger)}
+.thumb-remove:disabled{cursor:not-allowed;opacity:0.3!important}
+/* スマホ: 常時表示 */
+@media(max-width:600px){.thumb-remove{opacity:0.75}}
 
 .footer{font-family:'DM Mono',monospace;font-size:10px;color:#222;text-align:center;margin-top:48px;letter-spacing:1px;line-height:1.8}
 </style>
@@ -552,6 +559,7 @@ let currentMode='bicubic', currentScale=2, currentFmt='png';
 let queue=[];
 let originalFileName='image';
 let previewIndex=0; // 複数ファイル時のプレビュー対象インデックス
+let isProcessing=false; // 処理中フラグ（削除ボタン無効化に使用）
 
 // ===== 比較スライダー（グローバル・重複防止）=====
 let _cmpDrag=false, _cmpOuter=null, _cmpOverlay=null, _cmpLine=null, _cmpAttached=false;
@@ -934,12 +942,18 @@ async function loadPdf(file){
 }
 
 // ===== キューUI =====
-function renderQueueUI(){
+// resetPreview=true: 新規読み込み（previewIndex=0にリセット）
+// resetPreview=false: 削除後の再描画（previewIndexを維持）
+function renderQueueUI(resetPreview=true){
   const first=queue[0];if(!first)return;
   const isMulti=queue.length>1;
 
-  previewIndex=0; // 新規ファイル読み込み時は必ず先頭から
-  originalFileName=first.name.replace(/\.[^.]+$/,'');
+  if(resetPreview) previewIndex=0;
+  // previewIndexが範囲外になっていたら補正
+  if(previewIndex>=queue.length) previewIndex=queue.length-1;
+  if(previewIndex<0) previewIndex=0;
+
+  originalFileName=queue[previewIndex].name.replace(/\.[^.]+$/,'');
 
   document.getElementById('upload-area-wrap').style.display='none';
   document.getElementById('preview-area').style.display='block';
@@ -954,6 +968,23 @@ function renderQueueUI(){
   }
 
   // サムネイル一覧の構築（複数時のみ）
+  buildThumbs(isMulti);
+
+  // ナビ・プレビュー・バッチキューを更新
+  updateInputPreview(previewIndex);
+
+  if(isMulti){
+    document.getElementById('batch-queue').classList.add('show');
+  }else{
+    document.getElementById('batch-queue').classList.remove('show');
+  }
+
+  updateRunBtn();
+  updateActionChip();
+  rebuildQueueList();
+}
+
+function buildThumbs(isMulti){
   const thumbList=document.getElementById('thumb-list');
   const thumbRow=document.getElementById('thumb-row');
   if(isMulti){
@@ -961,14 +992,25 @@ function renderQueueUI(){
     thumbRow.innerHTML='';
     queue.slice(0,MAX_THUMB).forEach((f,i)=>{
       const item=document.createElement('div');
-      item.className='thumb-item'+(i===0?' active':'');
+      item.className='thumb-item'+(i===previewIndex?' active':'');
       item.id='thumb-'+i;
-      item.onclick=()=>updateInputPreview(i);
+      item.onclick=(e)=>{
+        // 削除ボタン以外のクリックでプレビュー切り替え
+        if(!e.target.classList.contains('thumb-remove')) updateInputPreview(i);
+      };
       const img=document.createElement('img');
       img.src=f.dataUrl;img.alt=f.name;img.loading='lazy';
       const num=document.createElement('span');
       num.className='thumb-num';num.textContent=i+1;
-      item.appendChild(img);item.appendChild(num);
+      // 削除ボタン
+      const delBtn=document.createElement('button');
+      delBtn.className='thumb-remove';
+      delBtn.title='このファイルを削除';
+      delBtn.setAttribute('aria-label','このファイルを削除');
+      delBtn.textContent='×';
+      delBtn.disabled=isProcessing;
+      delBtn.onclick=(e)=>{e.stopPropagation();removeQueueItem(i);};
+      item.appendChild(img);item.appendChild(num);item.appendChild(delBtn);
       thumbRow.appendChild(item);
     });
     if(queue.length>MAX_THUMB){
@@ -982,17 +1024,6 @@ function renderQueueUI(){
     thumbList.classList.remove('show');
     thumbRow.innerHTML='';
   }
-
-  // ナビ・プレビュー・バッチキューを更新
-  updateInputPreview(0);
-
-  if(isMulti){
-    document.getElementById('batch-queue').classList.add('show');
-  }
-
-  updateRunBtn();
-  updateActionChip();
-  rebuildQueueList();
 }
 
 // プレビュー切り替え関数
@@ -1028,7 +1059,26 @@ function updateInputPreview(index){
   // 出力側を入力インデックスに連動
   updateOutputForItem(f, isMulti?index:-1);
 }
-function rebuildQueueList(){
+// ===== ファイル削除 =====
+function removeQueueItem(index){
+  if(isProcessing) return; // 処理中は削除不可
+  if(index<0||index>=queue.length) return;
+
+  queue.splice(index,1);
+
+  // 最後の1枚を削除したらリセット
+  if(queue.length===0){
+    resetAll();
+    return;
+  }
+
+  // previewIndex の補正（削除されたインデックス以降はずれる）
+  if(previewIndex>=index&&previewIndex>0) previewIndex--;
+  if(previewIndex>=queue.length) previewIndex=queue.length-1;
+
+  // UI再描画（previewIndexを維持）
+  renderQueueUI(false);
+}
   const list=document.getElementById('queue-list');list.innerHTML='';
   queue.forEach((f,i)=>{
     const div=document.createElement('div');div.className='qi';div.id='qi'+i;
@@ -1183,6 +1233,9 @@ async function runAll(){
   const btn=document.getElementById('btn-run');
   const processingLabel=queue.length>1?`${queue.length}ファイル処理中...`:'処理中...';
   btn.disabled=true;btn.textContent=processingLabel;
+  isProcessing=true;
+  // 処理中は削除ボタンを無効化
+  document.querySelectorAll('.thumb-remove').forEach(b=>{b.disabled=true;});
   hideError();
 
   // tryAI: AIモードを選択 かつ AIモデルが使用可能な場合のみ
@@ -1244,6 +1297,8 @@ async function runAll(){
     console.error('[SAKASU Upscaler] runAll error:',e);
   }finally{
     // エラー時も必ずボタンを復元する
+    isProcessing=false;
+    document.querySelectorAll('.thumb-remove').forEach(b=>{b.disabled=false;});
     btn.disabled=false;btn.textContent='▶ 高画質化する';updateRunBtn();
   }
 }
@@ -1719,6 +1774,7 @@ function showPrintCard(pw,ph){
 function resetAll(){
   queue=[];
   previewIndex=0;
+  isProcessing=false;
   document.getElementById('upload-area-wrap').style.display='block';
   document.getElementById('preview-area').style.display='none';
   document.getElementById('out-placeholder').style.display='flex';
